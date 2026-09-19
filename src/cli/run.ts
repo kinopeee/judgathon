@@ -539,12 +539,13 @@ export async function cmdRun(opts: RunOptions): Promise<{
           return path.join('attempts', name);
         },
       },
-      () =>
+      (repairFeedback) =>
         providers.transcriber.transcribe({
           audioPath: path.join(outDir, audioRel),
           durationMs,
           promptText: transcriptPromptText,
           schema: transcriptJsonSchema,
+          ...(repairFeedback !== undefined ? { repairFeedback } : {}),
         }),
       (parsed) => validateTranscriptOutput(parsed, durationMs),
     );
@@ -604,10 +605,11 @@ export async function cmdRun(opts: RunOptions): Promise<{
           return path.join('attempts', name);
         },
       },
-      () =>
+      (repairFeedback) =>
         providers.extractor.extract({
           promptText: prompts.extractor.text,
           transcriptSegments: segments,
+          ...(repairFeedback !== undefined ? { repairFeedback } : {}),
           frames: inputFrames.map((f) => ({
             frameId: f.frame_id,
             timestampMs: f.timestamp_ms,

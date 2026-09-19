@@ -35,6 +35,8 @@ export interface TranscribeInput {
   durationMs: number;
   promptText: string;
   schema: Record<string, unknown>;
+  /** Schema-repair feedback re-sent as a trailing user turn (§41.5). */
+  repairFeedback?: string;
 }
 
 export interface ExtractInput {
@@ -43,6 +45,8 @@ export interface ExtractInput {
   frames: FrameRef[];
   rubricCriteria: Array<{ id: string; name: string; description: string }>;
   schema: Record<string, unknown>;
+  /** Schema-repair feedback re-sent as a trailing user turn (§41.5). */
+  repairFeedback?: string;
 }
 
 export interface ScoreInput {

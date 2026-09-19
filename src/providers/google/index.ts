@@ -157,11 +157,10 @@ async function generate(
           contents: [{ role: 'user', parts }],
           config: {
             systemInstruction: promptText,
+            abortSignal: signal,
             ...generationConfig(entry, schema),
           },
-          // abortSignal is accepted via request options in the SDK
-          ...( { abortSignal: signal } as Record<string, unknown>),
-        } as Parameters<typeof client.models.generateContent>[0]),
+        }),
       timeoutMs,
     );
   } catch (err) {
@@ -230,6 +229,9 @@ export class GoogleTranscriber implements Transcriber {
         audioPart,
         { text: `duration_ms=${input.durationMs}. Transcribe.` },
       ];
+      if (input.repairFeedback) {
+        parts.push({ text: input.repairFeedback });
+      }
       return await generate(client, this.entry, input.promptText, parts, input.schema, timeoutMs);
     } catch (err) {
       throw classifyError(err);
@@ -258,6 +260,9 @@ export class GoogleEvidenceExtractor implements EvidenceExtractor {
       { text: `rubric_criteria=${JSON.stringify(input.rubricCriteria)}` },
       ...(await frameParts(input.frames)),
     ];
+    if (input.repairFeedback) {
+      parts.push({ text: input.repairFeedback });
+    }
     return generate(client, this.entry, input.promptText, parts, input.schema, timeoutMs);
   }
 }

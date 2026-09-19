@@ -94,6 +94,40 @@ describe('extra branch coverage', () => {
     ).rejects.toBeInstanceOf(CliError);
     expect(calls).toBe(1);
   });
+  it('extractor schema repair: second call receives repairFeedback with the validation message', async () => {
+    const seen: Array<string | undefined> = [];
+    const extractor = {
+      extract: (input: { repairFeedback?: string }) => {
+        seen.push(input.repairFeedback);
+        return Promise.resolve({
+          output: seen.length === 1 ? { bad: true } : { evidence: [], injection_suspected: false },
+          rawText: '{}',
+          usage: null,
+          latencyMs: 1,
+          modelVersion: 'fixture',
+          responseId: null,
+          effectiveSettings: {},
+        });
+      },
+    };
+    const res = await callWithAttempts(
+      {
+        operation: 'evidence', sampleIndex: null, maxAttempts: 3,
+        sleep: async () => {}, now: () => Date.now(),
+        saveRaw: async () => 'x', stage: 'evidence',
+      },
+      (repairFeedback) =>
+        extractor.extract(repairFeedback !== undefined ? { repairFeedback } : {}),
+      (p) =>
+        (p as { evidence?: unknown }).evidence
+          ? { ok: true, value: p }
+          : { ok: false, errors: [{ code: 'SCHEMA_VIOLATION', message: 'missing evidence array' }] },
+    );
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeUndefined();
+    expect(seen[1]).toContain('missing evidence array');
+    expect(res.attempts.map((a) => a.status)).toEqual(['validation_failed', 'ok']);
+  });
   it('frame selection: scene-change + even-fill paths', () => {
     // Build 10 frames: distinct phashes so dedupe keeps all; one
     // evidence-referenced frame; fill remaining via scene-change ordering.
