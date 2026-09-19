@@ -138,4 +138,36 @@ describe('CLI run/repeat (fixture, no network)', () => {
     const res = runCli(['repeat', '--from', 'x', '--times', '3', '--provider-mode', 'fixture', '--out', 'y']);
     expect(res.status).toBe(2);
   });
+
+  it('unknown option -> exit 2 INVALID_ARGS', async () => {
+    const res = runCli(['run', '--bogus-option']);
+    expect(res.status).toBe(2);
+    expect(JSON.parse(res.stdout.trim()).error.code).toBe('INVALID_ARGS');
+  });
+
+  it('tampered transcript.json -> repeat exits 2 INPUT_HASH_MISMATCH before writing out dir', async () => {
+    const dir = await tmpDir('judgathon-e2e-');
+    const out = path.join(dir, 'run');
+    const res = runCli([
+      'run', '--video', sampleVideo(),
+      '--rubric', 'rubrics/hackathon-2026-v3.yaml',
+      '--config', 'configs/judge-google-v1.yaml',
+      '--provider-mode', 'fixture',
+      '--out', out,
+    ]);
+    expect(res.status, res.stderr).toBe(0);
+    // Modify the frozen artifact without touching the manifest.
+    const tPath = path.join(out, 'transcript.json');
+    const t = JSON.parse(await fs.readFile(tPath, 'utf8'));
+    t.segments[0].text = `${t.segments[0].text} tampered`;
+    await fs.writeFile(tPath, JSON.stringify(t, null, 2) + '\n');
+
+    const repOut = path.join(dir, 'repeat');
+    const rep = runCli([
+      'repeat', '--from', out, '--times', '5', '--provider-mode', 'fixture', '--out', repOut,
+    ]);
+    expect(rep.status).toBe(2);
+    expect(JSON.parse(rep.stdout.trim()).error.code).toBe('INPUT_HASH_MISMATCH');
+    expect(await fs.stat(repOut).then(() => true).catch(() => false)).toBe(false);
+  }, 240_000);
 });

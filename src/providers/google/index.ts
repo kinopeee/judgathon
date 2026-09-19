@@ -55,6 +55,36 @@ function makeClient(apiKey: string, timeoutMs: number): Pick<GoogleGenAI, 'model
   });
 }
 
+/**
+ * Gemini 429/503 bodies embed google.rpc.RetryInfo ({"retryDelay":"29.4s"})
+ * and/or the text "Please retry in 29.4s". ApiError.message carries the raw
+ * JSON body; ApiError exposes no headers field (checked d.ts).
+ */
+function retryAfterMsFrom(err: ApiError): number | undefined {
+  const msg = err.message;
+  try {
+    const body = JSON.parse(msg) as { error?: { details?: unknown[] }; details?: unknown[] };
+    const details = body.error?.details ?? body.details;
+    if (Array.isArray(details)) {
+      for (const d of details) {
+        if (
+          typeof d === 'object' &&
+          d !== null &&
+          String((d as Record<string, unknown>)['@type'] ?? '').endsWith('google.rpc.RetryInfo')
+        ) {
+          const m = /([\d.]+)s/.exec(String((d as Record<string, unknown>)['retryDelay'] ?? ''));
+          if (m) return Math.ceil(parseFloat(m[1]!) * 1000);
+        }
+      }
+    }
+  } catch {
+    // message was not a JSON body; fall through to the regex
+  }
+  const m = /retry in ([\d.]+)s/i.exec(msg);
+  if (m) return Math.ceil(parseFloat(m[1]!) * 1000);
+  return undefined;
+}
+
 function classifyError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
   if (err instanceof ApiError) {
@@ -63,10 +93,18 @@ function classifyError(err: unknown): ProviderError {
       return new ProviderError('auth', err.message, { httpStatus: status });
     }
     if (status === 429) {
-      return new ProviderError('rate_limited', err.message, { httpStatus: status });
+      const ra = retryAfterMsFrom(err);
+      return new ProviderError('rate_limited', err.message, {
+        httpStatus: status,
+        ...(ra !== undefined ? { retryAfterMs: ra } : {}),
+      });
     }
     if (status >= 500) {
-      return new ProviderError('server', err.message, { httpStatus: status });
+      const ra = status === 503 ? retryAfterMsFrom(err) : undefined;
+      return new ProviderError('server', err.message, {
+        httpStatus: status,
+        ...(ra !== undefined ? { retryAfterMs: ra } : {}),
+      });
     }
     if (status === 400) {
       return new ProviderError('invalid_input', err.message, { httpStatus: status });
@@ -124,6 +162,16 @@ function effectiveSettings(entry: ProviderEntry, promptText: string): Record<str
   };
 }
 
+function sleepAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(new ProviderError('timeout', `request aborted (budget exceeded)`));
+    }, { once: true });
+  });
+}
+
 async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -139,30 +187,26 @@ async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: numb
   }
 }
 
-async function generate(
+async function callGenerate(
   client: Pick<GoogleGenAI, 'models' | 'files'>,
   entry: ProviderEntry,
   promptText: string,
   parts: Part[],
   schema: Record<string, unknown>,
-  timeoutMs: number,
+  signal: AbortSignal,
 ): Promise<ProviderCallResult<unknown>> {
   const start = Date.now();
   let resp: GenerateContentResponse;
   try {
-    resp = await timed(
-      (signal) =>
-        client.models.generateContent({
-          model: entry.model,
-          contents: [{ role: 'user', parts }],
-          config: {
-            systemInstruction: promptText,
-            abortSignal: signal,
-            ...generationConfig(entry, schema),
-          },
-        }),
-      timeoutMs,
-    );
+    resp = await client.models.generateContent({
+      model: entry.model,
+      contents: [{ role: 'user', parts }],
+      config: {
+        systemInstruction: promptText,
+        abortSignal: signal,
+        ...generationConfig(entry, schema),
+      },
+    });
   } catch (err) {
     throw classifyError(err);
   }
@@ -182,6 +226,20 @@ async function generate(
     responseId: resp.responseId ?? null,
     effectiveSettings: effectiveSettings(entry, promptText),
   };
+}
+
+function generate(
+  client: Pick<GoogleGenAI, 'models' | 'files'>,
+  entry: ProviderEntry,
+  promptText: string,
+  parts: Part[],
+  schema: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<ProviderCallResult<unknown>> {
+  return timed(
+    (signal) => callGenerate(client, entry, promptText, parts, schema, signal),
+    timeoutMs,
+  );
 }
 
 async function frameParts(frames: ScoreInput['frames']): Promise<Part[]> {
@@ -212,33 +270,41 @@ export class GoogleTranscriber implements Transcriber {
     const client = this.opts.client ?? makeClient(this.opts.apiKey, timeoutMs);
     let uploaded: GenaiFile | null = null;
     try {
-      uploaded = await client.files.upload({
-        file: input.audioPath,
-        config: { mimeType: 'audio/wav' },
-      });
-      // Poll until ACTIVE (best-effort; short bounded loop).
-      for (let i = 0; i < 60 && uploaded.state !== 'ACTIVE'; i++) {
-        if (uploaded.state === 'FAILED') {
-          throw new ProviderError('invalid_input', 'uploaded audio file failed processing');
+      // Upload + poll + generate share a single attempt budget so the whole
+      // call can never exceed timeoutMs.
+      return await timed(async (signal) => {
+        uploaded = await client.files.upload({
+          file: input.audioPath,
+          config: { mimeType: 'audio/wav' },
+        });
+        // Poll until ACTIVE (bounded by the shared budget).
+        for (let i = 0; i < 120 && uploaded.state !== 'ACTIVE'; i++) {
+          if (uploaded.state === 'FAILED') {
+            throw new ProviderError('invalid_input', 'uploaded audio file failed processing');
+          }
+          await sleepAbort(1000, signal);
+          uploaded = await client.files.get({ name: uploaded.name! });
         }
-        await new Promise((r) => setTimeout(r, 2000));
-        uploaded = await client.files.get({ name: uploaded.name! });
-      }
-      const audioPart = createPartFromUri(uploaded.uri!, 'audio/wav');
-      const parts: Part[] = [
-        audioPart,
-        { text: `duration_ms=${input.durationMs}. Transcribe.` },
-      ];
-      if (input.repairFeedback) {
-        parts.push({ text: input.repairFeedback });
-      }
-      return await generate(client, this.entry, input.promptText, parts, input.schema, timeoutMs);
+        if (uploaded.state !== 'ACTIVE') {
+          throw new ProviderError('timeout', 'uploaded file not ACTIVE after wait');
+        }
+        const audioPart = createPartFromUri(uploaded.uri!, 'audio/wav');
+        const parts: Part[] = [
+          audioPart,
+          { text: `duration_ms=${input.durationMs}. Transcribe.` },
+        ];
+        if (input.repairFeedback) {
+          parts.push({ text: input.repairFeedback });
+        }
+        return await callGenerate(client, this.entry, input.promptText, parts, input.schema, signal);
+      }, timeoutMs);
     } catch (err) {
       throw classifyError(err);
     } finally {
-      if (uploaded?.name) {
+      const uploadedName = (uploaded as GenaiFile | null)?.name;
+      if (uploadedName) {
         try {
-          await client.files.delete({ name: uploaded.name });
+          await client.files.delete({ name: uploadedName });
         } catch {
           // best-effort cleanup; never mask the real error
         }

@@ -85,6 +85,28 @@ describe('google adapter (mocked SDK)', () => {
     ).rejects.toMatchObject({ kind: 'invalid_input' });
   });
 
+  it('parses RetryInfo retryDelay from a 429 body into retryAfterMs', async () => {
+    const body = JSON.stringify({
+      error: {
+        code: 429,
+        message: 'Quota exceeded. Please retry in 29.4s',
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '29.415s' },
+        ],
+      },
+    });
+    const judge = new GoogleJudge(entry, { apiKey: 'x' });
+    genContent.mockRejectedValueOnce(new FakeApiError({ message: body, status: 429 }));
+    await expect(
+      judge.score({ promptText: '', rubric: {}, evidenceSet: {}, transcriptSegments: [], frames: [], sampleIndex: 0, schema: {} }),
+    ).rejects.toMatchObject({ kind: 'rate_limited', retryAfterMs: 29415 });
+    // Fallback: plain message without RetryInfo JSON.
+    genContent.mockRejectedValueOnce(new FakeApiError({ message: 'Please retry in 29.4s', status: 429 }));
+    await expect(
+      judge.score({ promptText: '', rubric: {}, evidenceSet: {}, transcriptSegments: [], frames: [], sampleIndex: 0, schema: {} }),
+    ).rejects.toMatchObject({ kind: 'rate_limited', retryAfterMs: 29400 });
+  });
+
   it('extracts usage + modelVersion + responseId', async () => {
     genContent.mockResolvedValue(fakeResponse({ ok: 1 }));
     const judge = new GoogleJudge(entry, { apiKey: 'x' });

@@ -62,25 +62,30 @@ export function buildUsageReport(
   let input = new Decimal(0);
   let output = new Decimal(0);
   let thinking = new Decimal(0);
-  let anyNull = false;
+  // Per-dimension unknown tracking: a total is null if ANY attempt lacks
+  // that specific value — never silently summed as zero.
+  let inputUnknown = false;
+  let outputUnknown = false;
+  let thinkingUnknown = false;
+  let costUnknown = false;
   let knownCost = new Decimal(0);
   let unknownAttempts = 0;
 
   const attemptEntries = opts.attempts.map((a) => {
     const u: Usage | null = a.usage;
     const cost = estimateUsd(u, pricingModel);
-    if (cost !== null) knownCost = knownCost.plus(cost);
-    if (u === null || u.input_tokens === null || u.output_tokens === null) {
-      anyNull = true;
+    if (u === null || cost === null) {
+      costUnknown = true;
       unknownAttempts += 1;
     } else {
-      input = input.plus(u.input_tokens);
-      output = output.plus(u.output_tokens);
-      if (u.thinking_tokens !== null) thinking = thinking.plus(u.thinking_tokens);
-      else if (u.thinking_tokens === null) {
-        // unknown thinking tokens still allow the formula when included
-      }
+      knownCost = knownCost.plus(cost);
     }
+    if (u === null || u.input_tokens === null) inputUnknown = true;
+    else input = input.plus(u.input_tokens);
+    if (u === null || u.output_tokens === null) outputUnknown = true;
+    else output = output.plus(u.output_tokens);
+    if (u === null || u.thinking_tokens === null) thinkingUnknown = true;
+    else thinking = thinking.plus(u.thinking_tokens);
     return {
       attempt_index: a.attempt_index,
       operation: a.operation,
@@ -101,10 +106,10 @@ export function buildUsageReport(
     pricing_table: opts.pricing,
     attempts: attemptEntries,
     totals: {
-      input_tokens: anyNull ? null : input.toString(),
-      output_tokens: anyNull ? null : output.toString(),
-      thinking_tokens: anyNull ? null : thinking.toString(),
-      estimated_usd: anyNull ? null : knownCost.toString(),
+      input_tokens: inputUnknown ? null : input.toString(),
+      output_tokens: outputUnknown ? null : output.toString(),
+      thinking_tokens: thinkingUnknown ? null : thinking.toString(),
+      estimated_usd: costUnknown ? null : knownCost.toString(),
       known_estimated_usd: knownCost.toString(),
       unknown_attempts: unknownAttempts,
     },

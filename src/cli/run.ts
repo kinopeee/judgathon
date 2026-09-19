@@ -34,7 +34,8 @@ import {
   selectJudgeFrames,
   type FrameCandidate,
 } from '../core/frame-selection.js';
-import { callWithAttempts, type AttemptRecord } from '../core/retry.js';
+import { callWithAttempts, type AttemptRecord, type AttemptSuccess } from '../core/retry.js';
+import { computeInputHash } from '../core/input-hash.js';
 import {
   fileExists,
   isAbsentOrEmptyDir,
@@ -239,6 +240,8 @@ export async function runJudgeStage(opts: {
     selectedFrameIds: Set<string>;
   };
   reviewFlagsExtra: string[];
+  /** Extractor-side injection flag — OR-ed into the scorecard (§41). */
+  extraInjectionSuspected: boolean;
   deadlineMs: number;
   stage: string;
   judgeRunId: string;
@@ -255,7 +258,9 @@ export async function runJudgeStage(opts: {
   const samples: unknown[] = [];
 
   for (let sampleIndex = 0; sampleIndex < 3; sampleIndex++) {
-    const res = await callWithAttempts<RawScoreOutput>(
+    let res: AttemptSuccess<RawScoreOutput>;
+    try {
+      res = await callWithAttempts<RawScoreOutput>(
       {
         operation: 'judge',
         sampleIndex,
@@ -293,6 +298,16 @@ export async function runJudgeStage(opts: {
           selectedFrameIds: opts.validationCtx.selectedFrameIds,
         }),
     );
+    } catch (err) {
+      // callWithAttempts attaches its own `attempts`; merge them with prior
+      // successful samples so every provider call reaches usage.json.
+      const partial = (err as { attempts?: AttemptRecord[] }).attempts ?? [];
+      allAttempts.push(...partial);
+      throw Object.assign(
+        err instanceof Error ? err : new Error(String(err)),
+        { attempts: allAttempts },
+      );
+    }
     allAttempts.push(...res.attempts);
     validated.push(res.value);
     samples.push({
@@ -305,6 +320,7 @@ export async function runJudgeStage(opts: {
 
   const score = aggregateScores(opts.rubric, validated, {
     extraReviewFlags: opts.reviewFlagsExtra,
+    extraInjectionSuspected: opts.extraInjectionSuspected,
   });
 
   const judgeRun = {
@@ -340,6 +356,18 @@ export async function runJudgeStage(opts: {
   };
 
   return { judgeRun, scorecard, attempts: allAttempts, rawTexts: [] };
+}
+
+export function buildEvidenceForPrompt(
+  evidenceItems: Array<Record<string, unknown> & { id: string }>,
+  unshownSourceIds: Record<string, string[]>,
+): { evidence: Array<Record<string, unknown>> } {
+  return {
+    evidence: evidenceItems.map((e) => ({
+      ...e,
+      unshown_source_ids: unshownSourceIds[e.id] ?? [],
+    })),
+  };
 }
 
 export async function cmdRun(opts: RunOptions): Promise<{
@@ -407,6 +435,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
     stage: 'prepare_output',
     created_at: new Date().toISOString(),
   };
+  const completedAttempts: AttemptRecord[] = [];
   const fail = async (stage: string, err: CliError): Promise<never> => {
     manifest['status'] = 'failed';
     manifest['stage'] = stage;
@@ -549,6 +578,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
         }),
       (parsed) => validateTranscriptOutput(parsed, durationMs),
     );
+    completedAttempts.push(...transcriptRes.attempts);
 
     const segments: TranscriptSegment[] = transcriptRes.value.segments.map((s) => ({
       id: newTranscriptSegmentId(),
@@ -629,6 +659,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
           criterionIds: new Set(rubric.criteria.map((c) => c.id)),
         }),
     );
+    completedAttempts.push(...evRes.attempts);
 
     const evidenceItems = evRes.value.evidence.map((e) => ({
       id: newEvidenceId(),
@@ -686,22 +717,28 @@ export async function cmdRun(opts: RunOptions): Promise<{
 
     // Stage: judge
     log('[judge] scoring (3 samples)');
-    const evidenceForPrompt = {
-      evidence: evidenceItems.map((e) => ({
-        ...e,
-        unshown_source_ids: selection.unshown_source_ids[e.id] ?? [],
-      })),
+    const evidenceForPrompt = buildEvidenceForPrompt(evidenceItems, selection.unshown_source_ids);
+    // Frozen-input hash components are computed from the WRITTEN files so
+    // repeat's verification covers exactly what was persisted.
+    const transcriptSha256 = await sha256File(path.join(outDir, 'transcript.json'));
+    const evidenceSetSha256 = await sha256File(path.join(outDir, 'evidence-set.json'));
+    const inputHash = computeInputHash({
+      transcriptSha256,
+      evidenceSetSha256,
+      selectedFrameSha256s: selectedFrames.map((f) => f.sha256),
+      rubricSha256: rubricSha,
+      configSha256: configSha,
+      judgePromptSha256: prompts.judge.sha256,
+    });
+    manifest['frozen_inputs'] = {
+      transcript_sha256: transcriptSha256,
+      evidence_set_sha256: evidenceSetSha256,
+      selected_frame_ids: selection.selected_frame_ids,
+      rubric_sha256: rubricSha,
+      config_sha256: configSha,
+      judge_prompt_sha256: prompts.judge.sha256,
+      input_hash: inputHash,
     };
-    const inputHash = sha256Hex(
-      [
-        sha256Hex(stableStringify(transcriptJson)),
-        sha256Hex(stableStringify(evidenceSetJson)),
-        ...selectedFrames.map((f) => f.sha256),
-        rubricSha,
-        configSha,
-        prompts.judge.sha256,
-      ].join('\n'),
-    );
 
     const judgeRunId = newJudgeRunId();
     const judgeRes = await runJudgeStage({
@@ -723,6 +760,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
         selectedFrameIds: new Set(selection.selected_frame_ids),
       },
       reviewFlagsExtra,
+      extraInjectionSuspected: evidenceSetJson.injection_suspected,
       deadlineMs,
       stage: 'judge',
       judgeRunId,
@@ -734,6 +772,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
       videoAbsent: !media.hasVideo,
     });
 
+    completedAttempts.push(...judgeRes.attempts);
     await writeJsonAtomic(path.join(outDir, 'judge-run.json'), judgeRes.judgeRun);
     await writeJsonAtomic(path.join(outDir, 'scorecard.json'), judgeRes.scorecard);
     manifest['stage'] = 'judge_done';
@@ -770,14 +809,9 @@ export async function cmdRun(opts: RunOptions): Promise<{
     await writeJsonAtomic(path.join(outDir, 'config.snapshot.json'), configSnapshot);
     await writeJsonAtomic(path.join(outDir, 'rubric.snapshot.json'), rubricSnapshot);
 
-    const allAttempts = [
-      ...transcriptRes.attempts,
-      ...evRes.attempts,
-      ...judgeRes.attempts,
-    ];
     await writeJsonAtomic(
       path.join(outDir, 'usage.json'),
-      usageDoc(providers, allAttempts, config, pricing),
+      usageDoc(providers, completedAttempts, config, pricing),
     );
 
     const auditIds = selectAuditSample(evidenceIds);
@@ -808,14 +842,24 @@ export async function cmdRun(opts: RunOptions): Promise<{
     return { runId, outDir, scorecard: judgeRes.scorecard };
   } catch (err) {
     if (err instanceof CliError) {
+      // Persist usage for every attempt made so far, including the failed
+      // call's attempts (attached by callWithAttempts / runJudgeStage).
+      const partial = (err as { attempts?: AttemptRecord[] }).attempts ?? [];
+      const recorded = [...completedAttempts, ...partial];
+      if (recorded.length > 0) {
+        try {
+          await writeJsonAtomic(
+            path.join(outDir, 'usage.json'),
+            usageDoc(providers, recorded, config, pricing),
+          );
+        } catch {
+          // never mask the real failure with a usage-write error
+        }
+      }
       await fail(err.stage, err);
     }
     throw err;
   }
-}
-
-function stableStringify(v: unknown): string {
-  return JSON.stringify(v);
 }
 
 function usageDoc(

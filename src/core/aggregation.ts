@@ -62,7 +62,7 @@ export function medianLevel(levels: number[]): Decimal | null {
 export function aggregateScores(
   rubric: Rubric,
   samples: RawScoreOutput[],
-  opts?: { extraReviewFlags?: string[] },
+  opts?: { extraReviewFlags?: string[]; extraInjectionSuspected?: boolean },
 ): ScorecardResult {
   const criteria: AggregatedCriterion[] = [];
 
@@ -151,7 +151,9 @@ export function aggregateScores(
       insufficientCriteria.push(c.criterion_id);
     }
   }
-  const injectionSuspected = samples.some((s) => s.injection_suspected);
+  // §41: extractor flag ORs into the scorecard alongside judge samples.
+  const injectionSuspected =
+    samples.some((s) => s.injection_suspected) || opts?.extraInjectionSuspected === true;
   if (injectionSuspected) reviewFlags.add('injection_suspected');
 
   const uncertainties = [...new Set(samples.flatMap((s) => s.uncertainties))];

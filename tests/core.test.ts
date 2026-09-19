@@ -171,6 +171,15 @@ describe('aggregation (§13)', () => {
     expect(res.insufficient_criteria).toEqual(['alpha', 'beta']);
     expect(res.review_flags).toContain('insufficient_for_all');
   });
+  it('extractor injection_suspected ORs into scorecard even when judges are clean', () => {
+    const res = aggregateScores(
+      TEST_RUBRIC,
+      [scoreOutput([4, 4]), scoreOutput([4, 4]), scoreOutput([4, 4])],
+      { extraInjectionSuspected: true },
+    );
+    expect(res.injection_suspected).toBe(true);
+    expect(res.review_flags).toContain('injection_suspected');
+  });
   it('unstable via 3 distinct valid values [1,2,3]', () => {
     const res = aggregateScores(TEST_RUBRIC, [
       scoreOutput([1, 4]),

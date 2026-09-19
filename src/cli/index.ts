@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsConfig } from 'node:util';
 import path from 'node:path';
 import { CliError } from '../core/errors.js';
 import { cmdRun } from './run.js';
@@ -25,11 +25,25 @@ function exitCodeFor(err: CliError): number {
   return EXIT_BY_CODE[err.code] ?? err.exitCode;
 }
 
+function parseCliArgs<T extends ParseArgsConfig>(config: T) {
+  try {
+    return parseArgs(config);
+  } catch (err) {
+    // parseArgs throws TypeError with code ERR_PARSE_ARGS_* for unknown
+    // options, missing values, etc. -> exit 2 INVALID_ARGS.
+    const code = (err as { code?: string }).code;
+    if (err instanceof TypeError && typeof code === 'string' && code.startsWith('ERR_PARSE_ARGS')) {
+      throw new CliError('INVALID_ARGS', err.message, 2, 'validate_input');
+    }
+    throw err;
+  }
+}
+
 async function main(): Promise<number> {
   const [command, ...rest] = process.argv.slice(2);
   try {
     if (command === 'run') {
-      const { values } = parseArgs({
+      const { values } = parseCliArgs({
         args: rest,
         options: {
           video: { type: 'string' },
@@ -92,7 +106,7 @@ async function main(): Promise<number> {
     }
 
     if (command === 'repeat') {
-      const { values } = parseArgs({
+      const { values } = parseCliArgs({
         args: rest,
         options: {
           from: { type: 'string' },
