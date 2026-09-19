@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+out/
+samples/*.mp4
+samples/*.webm
+samples/**/media/
+*.wav
+.env*
+live-runs/
