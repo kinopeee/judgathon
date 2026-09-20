@@ -434,10 +434,10 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
         for (const c of (res.scorecard as { criteria: Array<{ criterion_id: string; aggregated_level: string | null }> }).criteria) {
           levels.set(c.criterion_id, c.aggregated_level);
         }
-        perRunLevels.push(levels);
         childManifest['status'] = 'completed';
         childManifest['stage'] = 'completed';
         await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
+        perRunLevels.push(levels);
         runs.push({ index: i + 1, path: `runs/${idx}`, status: 'completed', run_id: childRunId });
       } catch (err) {
         // Merge all attempts made so far (prior samples + the failed call's

@@ -447,7 +447,12 @@ export async function cmdRun(opts: RunOptions): Promise<{
     manifest['status'] = 'failed';
     manifest['stage'] = stage;
     manifest['error'] = { code: err.code, message: err.message };
-    await writeJsonAtomic(manifestPath, manifest);
+    delete manifest['completed_at'];
+    try {
+      await writeJsonAtomic(manifestPath, manifest);
+    } catch {
+      // Best-effort: a failed-manifest write must not mask the primary error.
+    }
     throw err;
   };
 
@@ -881,24 +886,33 @@ export async function cmdRun(opts: RunOptions): Promise<{
 
     return { runId, outDir, scorecard: judgeRes.scorecard };
   } catch (err) {
-    if (err instanceof CliError) {
-      // Persist usage for every attempt made so far, including the failed
-      // call's attempts (attached by callWithAttempts / runJudgeStage).
-      const partial = (err as { attempts?: AttemptRecord[] }).attempts ?? [];
-      const recorded = [...completedAttempts, ...partial];
-      if (recorded.length > 0) {
-        try {
-          await writeJsonAtomic(
-            path.join(outDir, 'usage.json'),
-            usageDoc(providers, recorded, config, pricing),
-          );
-        } catch {
-          // never mask the real failure with a usage-write error
-        }
+    // Persist usage for every attempt made so far, including the failed
+    // call's attempts (attached by callWithAttempts / runJudgeStage).
+    const partial = (err as { attempts?: AttemptRecord[] }).attempts ?? [];
+    const recorded = [...completedAttempts, ...partial];
+    if (recorded.length > 0) {
+      try {
+        await writeJsonAtomic(
+          path.join(outDir, 'usage.json'),
+          usageDoc(providers, recorded, config, pricing),
+        );
+      } catch {
+        // never mask the real failure with a usage-write error
       }
-      await fail(err.stage, err);
     }
-    throw err;
+    const cliErr =
+      err instanceof CliError
+        ? err
+        : Object.assign(
+            new CliError(
+              'INTERNAL_ERROR',
+              err instanceof Error ? err.message : String(err),
+              3,
+              'internal',
+            ),
+            { cause: err },
+          );
+    return await fail(cliErr.stage, cliErr);
   }
 }
 
