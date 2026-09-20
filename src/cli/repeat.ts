@@ -428,16 +428,35 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           videoAbsent: selectedMeta.length === 0,
         });
         allAttempts.push(...res.attempts);
-        await writeJsonAtomic(path.join(childDir, 'judge-run.json'), res.judgeRun);
-        await writeJsonAtomic(path.join(childDir, 'scorecard.json'), res.scorecard);
         const levels = new Map<string, string | null>();
         for (const c of (res.scorecard as { criteria: Array<{ criterion_id: string; aggregated_level: string | null }> }).criteria) {
           levels.set(c.criterion_id, c.aggregated_level);
         }
+        try {
+          await writeJsonAtomic(path.join(childDir, 'judge-run.json'), res.judgeRun);
+          await writeJsonAtomic(path.join(childDir, 'scorecard.json'), res.scorecard);
+          childManifest['status'] = 'completed';
+          childManifest['stage'] = 'completed';
+          await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
+        } catch (err) {
+          // Artifact persistence failed, not the judge call: revert the
+          // tentative completed state so the failed manifest records where
+          // the run actually stopped.
+          childManifest['status'] = 'running';
+          childManifest['stage'] = 'judge';
+          throw err instanceof CliError
+            ? err
+            : Object.assign(
+                new CliError(
+                  'INTERNAL_ERROR',
+                  err instanceof Error ? err.message : String(err),
+                  3,
+                  'judge',
+                ),
+                { cause: err },
+              );
+        }
         perRunLevels.push(levels);
-        childManifest['status'] = 'completed';
-        childManifest['stage'] = 'completed';
-        await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
         runs.push({ index: i + 1, path: `runs/${idx}`, status: 'completed', run_id: childRunId });
       } catch (err) {
         // Merge all attempts made so far (prior samples + the failed call's
