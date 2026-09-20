@@ -16,7 +16,7 @@
 - バリデーション: Zod 4（`src/core/schemas/`）
 - LLM provider: `@google/genai`（Gemini、live モードのみ）
 - メディア処理: `ffmpeg` / `ffprobe`（PATH 必須）
-- テスト: Vitest /  Lint: ESLint 9（flat config）
+- テスト: Vitest / Lint: ESLint 9（flat config）
 
 ## まず確認すること
 
@@ -64,7 +64,7 @@
 ## セキュリティ・運用
 
 - API キー・秘密情報は環境変数で管理し、コミット・ログ出力しない
-- `.env*`、`out/`、`live-runs/`、`samples/` はコミットしない（`.gitignore` 済み）
+- `.env*`、`out/`、`live-runs/`、生成メディア（`samples/*.mp4` / `*.webm` / `samples/**/media/` / `*.wav`）はコミットしない（`.gitignore` 済み）
 
 ## テストと検証
 
@@ -75,7 +75,7 @@ pnpm install --frozen-lockfile
 pnpm typecheck   # tsc --noEmit
 pnpm lint        # eslint .
 pnpm build       # tsc -p tsconfig.build.json
-pnpm test        # vitest run（CI は pnpm test:coverage）
+pnpm test:coverage  # vitest run --coverage（CI と同一）
 ```
 
 手動確認の目安（fixture モード、ネットワーク不要）:
