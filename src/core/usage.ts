@@ -5,11 +5,12 @@ import type { Usage } from '../providers/types.js';
 
 /** Cost accounting (§41.3 usage.json). Decimal arithmetic; null-safe. */
 
+export const USAGE_CALCULATION_VERSION = 'gemini-output-plus-thinking-v2';
+
 export interface PricingModel {
   valid_until: string;
   input_per_1m_tokens: number;
   output_per_1m_tokens: number;
-  output_includes_thinking?: boolean;
 }
 
 export interface PricingTable {
@@ -29,19 +30,18 @@ export async function loadPricing(pricingPath: string): Promise<{
 
 export function estimateUsd(usage: Usage | null, model: PricingModel | undefined): Decimal | null {
   if (!usage || !model) return null;
-  if (usage.input_tokens === null || usage.output_tokens === null) return null;
-  const thinking = usage.thinking_tokens ?? null;
-  const outputTokens = model.output_includes_thinking
-    ? new Decimal(usage.output_tokens)
-    : new Decimal(usage.output_tokens).plus(thinking ?? 0);
-  if (!model.output_includes_thinking && thinking === null) {
-    // thinking unknown but required for the formula when billed separately
-    return null;
-  }
+  if (
+    usage.input_tokens === null ||
+    usage.output_tokens === null ||
+    usage.thinking_tokens === null
+  ) return null;
   const input = new Decimal(usage.input_tokens)
     .times(model.input_per_1m_tokens)
     .div(1_000_000);
-  const output = outputTokens.times(model.output_per_1m_tokens).div(1_000_000);
+  const output = new Decimal(usage.output_tokens)
+    .plus(usage.thinking_tokens)
+    .times(model.output_per_1m_tokens)
+    .div(1_000_000);
   return input.plus(output);
 }
 
@@ -101,6 +101,7 @@ export function buildUsageReport(
 
   return {
     schema_version: 1,
+    calculation_version: USAGE_CALCULATION_VERSION,
     mode: opts.mode,
     model,
     pricing_table: opts.pricing,

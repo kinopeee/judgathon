@@ -1,8 +1,15 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tmpDir, sampleVideo } from './helpers.js';
+import { FixtureJudge } from '../src/providers/fixture/index.js';
+import type { ScoreInput } from '../src/providers/types.js';
+import { cmdRepeat } from '../src/cli/repeat.js';
+import { cmdRun } from '../src/cli/run.js';
+import * as storage from '../src/core/storage.js';
+import { sha256File } from '../src/core/storage.js';
+import { ProviderError } from '../src/core/errors.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const CLI = path.join(ROOT, 'dist', 'cli', 'index.js');
@@ -32,7 +39,7 @@ describe('CLI run/repeat (fixture, no network)', () => {
     const res = runCli([
       'run', '--video', video,
       '--rubric', 'rubrics/hackathon-2026-v3.yaml',
-      '--config', 'configs/judge-google-v1.yaml',
+      '--config', 'configs/judge-google-v2.yaml',
       '--output-language', 'ja',
       '--provider-mode', 'fixture',
       '--out', out,
@@ -67,7 +74,7 @@ describe('CLI run/repeat (fixture, no network)', () => {
     const res = runCli([
       'run', '--video', sampleVideo(),
       '--rubric', 'rubrics/hackathon-2026-v3.yaml',
-      '--config', 'configs/judge-google-v1.yaml',
+      '--config', 'configs/judge-google-v2.yaml',
       '--provider-mode', 'fixture', '--fixture-dir', fx,
       '--out', path.join(dir, 'out'),
     ]);
@@ -86,7 +93,7 @@ describe('CLI run/repeat (fixture, no network)', () => {
     const res = runCli([
       'run', '--video', sampleVideo(),
       '--rubric', 'rubrics/hackathon-2026-v3.yaml',
-      '--config', 'configs/judge-google-v1.yaml',
+      '--config', 'configs/judge-google-v2.yaml',
       '--provider-mode', 'fixture', '--out', out,
     ]);
     expect(res.status).toBe(2);
@@ -99,7 +106,7 @@ describe('CLI run/repeat (fixture, no network)', () => {
     const res = runCli([
       'run', '--video', sampleVideo(),
       '--rubric', 'rubrics/hackathon-2026-v3.yaml',
-      '--config', 'configs/judge-google-v1.yaml',
+      '--config', 'configs/judge-google-v2.yaml',
       '--output-language', 'en',
       '--provider-mode', 'fixture', '--out', path.join(dir, 'out'),
     ]);
@@ -119,7 +126,7 @@ describe('CLI run/repeat (fixture, no network)', () => {
           // Any existing file works — the credential check precedes media probing.
           video: path.resolve('package.json'),
           rubricPath: path.resolve('rubrics/hackathon-2026-v3.yaml'),
-          configPath: path.resolve('configs/judge-google-v1.yaml'),
+          configPath: path.resolve('configs/judge-google-v2.yaml'),
           outDir: path.join(dir, 'out'),
           providerMode: 'live',
           fixtureDir: path.resolve('fixtures/default'),
@@ -151,7 +158,7 @@ describe('CLI run/repeat (fixture, no network)', () => {
     const res = runCli([
       'run', '--video', sampleVideo(),
       '--rubric', 'rubrics/hackathon-2026-v3.yaml',
-      '--config', 'configs/judge-google-v1.yaml',
+      '--config', 'configs/judge-google-v2.yaml',
       '--provider-mode', 'fixture',
       '--out', out,
     ]);
@@ -170,4 +177,500 @@ describe('CLI run/repeat (fixture, no network)', () => {
     expect(JSON.parse(rep.stdout.trim()).error.code).toBe('INPUT_HASH_MISMATCH');
     expect(await fs.stat(repOut).then(() => true).catch(() => false)).toBe(false);
   }, 240_000);
+});
+
+describe('CLI launcher', () => {
+  it('L01 reports BUILD_REQUIRED when dist is absent', async () => {
+    const dir = await tmpDir('judgathon-launcher-missing-');
+    const scriptsDir = path.join(dir, 'scripts');
+    await fs.mkdir(scriptsDir, { recursive: true });
+    const launcher = path.join(scriptsDir, 'judgathon.mjs');
+    await fs.copyFile(path.join(ROOT, 'scripts/judgathon.mjs'), launcher);
+    const res = spawnSync('node', [launcher], { encoding: 'utf8' });
+    expect(res.status).toBe(2);
+    expect(res.stderr.trim()).toBe(
+      'BUILD_REQUIRED: dist/cli/index.js not found. Run `pnpm build` first.',
+    );
+  });
+
+  it('L02 behaves like the dist entry when invoked directly', () => {
+    const launcher = path.join(ROOT, 'scripts/judgathon.mjs');
+    const direct = spawnSync('node', [CLI], { cwd: ROOT, encoding: 'utf8' });
+    const wrapped = spawnSync('node', [launcher], { cwd: ROOT, encoding: 'utf8' });
+    expect(wrapped.status).toBe(direct.status);
+    expect(wrapped.stdout).toBe(direct.stdout);
+    expect(wrapped.stderr).toBe(direct.stderr);
+  });
+
+  it('L03 runs a fixture job through the package bin', async () => {
+    const dir = await tmpDir('judgathon-launcher-bin-');
+    const res = spawnSync(
+      'pnpm',
+      [
+        'exec',
+        'judgathon',
+        'run',
+        '--video',
+        sampleVideo(),
+        '--rubric',
+        './rubrics/hackathon-2026-v3.yaml',
+        '--config',
+        './configs/judge-google-v2.yaml',
+        '--output-language',
+        'ja',
+        '--provider-mode',
+        'fixture',
+        '--out',
+        path.join(dir, 'run'),
+      ],
+      { cwd: ROOT, encoding: 'utf8', timeout: 180_000 },
+    );
+    expect(res.status, res.stderr).toBe(0);
+    expect(JSON.parse(res.stdout.trim()).status).toBe('completed');
+  }, 240_000);
+});
+
+describe('frozen inputs v2', () => {
+  let sourceDir: string;
+  beforeAll(async () => {
+    const dir = tmpDir('judgathon-frozen-');
+    sourceDir = path.join(dir, 'run');
+    await cmdRun({
+      video: sampleVideo(),
+      rubricPath: path.join(ROOT, 'rubrics/hackathon-2026-v3.yaml'),
+      configPath: path.join(ROOT, 'configs/judge-google-v2.yaml'),
+      outDir: sourceDir,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      videoSource: 'screen',
+      promptsDir: path.join(ROOT, 'prompts'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+  }, 240_000);
+
+  it('A03 persists null ASR confidence for every fixture segment', async () => {
+    const transcript = JSON.parse(
+      await fs.readFile(path.join(sourceDir, 'transcript.json'), 'utf8'),
+    ) as { segments: Array<{ asr_confidence: null }> };
+    expect(transcript.segments.length).toBeGreaterThan(0);
+    expect(transcript.segments.every((segment) => segment.asr_confidence === null)).toBe(true);
+  });
+
+  it('A04 uses the v2 transcription prompt', async () => {
+    const prompt = await fs.readFile(
+      path.join(sourceDir, 'prompts', 'transcriber', 'transcribe-v2.md'),
+      'utf8',
+    );
+    expect(prompt.toLowerCase()).toContain('null');
+    expect(prompt.toLowerCase()).not.toContain('your confidence');
+  });
+
+  it('keeps role-specific prompt snapshots when versions are shared', async () => {
+    const dir = await tmpDir('judgathon-shared-prompt-');
+    const configPath = path.join(dir, 'config.yaml');
+    const configText = await fs.readFile(path.join(ROOT, 'configs/judge-google-v2.yaml'), 'utf8');
+    await fs.writeFile(
+      configPath,
+      configText
+        .replace('id: judge-google-v2', 'id: judge-google-shared-prompt')
+        .replace('prompt_version: absolute-score-v1', 'prompt_version: transcribe-v2'),
+    );
+    const runDir = path.join(dir, 'run');
+    await cmdRun({
+      video: sampleVideo(),
+      rubricPath: path.join(ROOT, 'rubrics/hackathon-2026-v3.yaml'),
+      configPath,
+      outDir: runDir,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      videoSource: 'screen',
+      promptsDir: path.join(ROOT, 'prompts'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    const snapshot = JSON.parse(
+      await fs.readFile(path.join(runDir, 'config.snapshot.json'), 'utf8'),
+    ) as {
+      effective: {
+        prompts: {
+          transcriber: { path: string };
+          evidence_extractor: { path: string };
+          judge: { path: string };
+        };
+      };
+    };
+    expect(snapshot.effective.prompts.transcriber.path).toBe('prompts/transcriber/transcribe-v2.md');
+    expect(snapshot.effective.prompts.judge.path).toBe('prompts/judge/transcribe-v2.md');
+    const transcriberPrompt = await fs.readFile(
+      path.join(runDir, snapshot.effective.prompts.transcriber.path),
+      'utf8',
+    );
+    const judgePrompt = await fs.readFile(
+      path.join(runDir, snapshot.effective.prompts.judge.path),
+      'utf8',
+    );
+    expect(transcriberPrompt).not.toBe(judgePrompt);
+
+    const repeatDir = path.join(dir, 'repeat');
+    const repeat = await cmdRepeat({
+      fromDir: runDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: repeatDir,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    expect(repeat.status).toBe('pass');
+  });
+
+  it('propagates a usage-write failure after a successful repeat', async () => {
+    const out = path.join(tmpDir('judgathon-usage-write-'), 'repeat');
+    const writeJsonAtomic = storage.writeJsonAtomic;
+    const writeSpy = vi.spyOn(storage, 'writeJsonAtomic').mockImplementation(async (filePath, value) => {
+      if (filePath.endsWith(path.join('', 'usage.json'))) {
+        throw new Error('usage write failed');
+      }
+      await writeJsonAtomic(filePath, value);
+    });
+    await expect(cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toThrow('usage write failed');
+    expect(writeSpy).toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
+  it('F01 preserves every judge input across run and repeat', async () => {
+    const calls: ScoreInput[] = [];
+    const originalScore = FixtureJudge.prototype.score;
+    const scoreSpy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      calls.push(input);
+      return originalScore.call(this, input);
+    });
+    const runDir = path.join(tmpDir('judgathon-frozen-run-'), 'run');
+    await cmdRun({
+      video: sampleVideo(),
+      rubricPath: path.join(ROOT, 'rubrics/hackathon-2026-v3.yaml'),
+      configPath: path.join(ROOT, 'configs/judge-google-v2.yaml'),
+      outDir: runDir,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      videoSource: 'screen',
+      promptsDir: path.join(ROOT, 'prompts'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    const runCalls = calls.splice(0, calls.length);
+    const repeatDir = path.join(tmpDir('judgathon-frozen-repeat-'), 'repeat');
+    await cmdRepeat({
+      fromDir: runDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: repeatDir,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    const sourceScorecard = JSON.parse(
+      await fs.readFile(path.join(runDir, 'scorecard.json'), 'utf8'),
+    ) as { review_flags: string[] };
+    for (let i = 1; i <= 5; i++) {
+      const repeatScorecard = JSON.parse(
+        await fs.readFile(path.join(repeatDir, 'runs', String(i).padStart(2, '0'), 'scorecard.json'), 'utf8'),
+      ) as { review_flags: string[] };
+      expect(repeatScorecard.review_flags).toEqual(sourceScorecard.review_flags);
+    }
+    expect(runCalls).toHaveLength(3);
+    expect(calls).toHaveLength(15);
+    for (let i = 0; i < calls.length; i++) {
+      const expected = runCalls[i % 3]!;
+      const actual = calls[i]!;
+      expect(actual.promptText).toBe(expected.promptText);
+      expect(actual.rubric).toEqual(expected.rubric);
+      expect(actual.evidenceSet).toEqual(expected.evidenceSet);
+      expect(actual.transcriptSegments).toEqual(expected.transcriptSegments);
+      expect(actual.schema).toEqual(expected.schema);
+      expect(actual.frames.map(({ frameId, timestampMs }) => ({ frameId, timestampMs }))).toEqual(
+        expected.frames.map(({ frameId, timestampMs }) => ({ frameId, timestampMs })),
+      );
+      for (let j = 0; j < actual.frames.length; j++) {
+        expect(await fs.readFile(actual.frames[j]!.path)).toEqual(await fs.readFile(expected.frames[j]!.path));
+      }
+    }
+    scoreSpy.mockRestore();
+  });
+
+  it('F02 rejects evidence missing description before provider calls', async () => {
+    const dir = tmpDir('judgathon-frozen-invalid-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const evidencePath = path.join(copy, 'evidence-set.json');
+    const evidence = JSON.parse(await fs.readFile(evidencePath, 'utf8'));
+    delete evidence.evidence[0].description;
+    await fs.writeFile(evidencePath, `${JSON.stringify(evidence)}\n`);
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: copy,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'INPUT_INVALID', exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('F03 preserves unshown_source_ids for every repeat judge call', async () => {
+    const evidenceSet = JSON.parse(
+      await fs.readFile(path.join(sourceDir, 'evidence-set.json'), 'utf8'),
+    ) as {
+      evidence: Array<{ id: string; sources: Array<{ type: string; id: string }> }>;
+      selected_frame_ids: string[];
+    };
+    const selected = new Set(evidenceSet.selected_frame_ids);
+    const expected = evidenceSet.evidence.map((item) => ({
+      ...item,
+      unshown_source_ids: item.sources
+        .filter((source) => source.type === 'frame' && !selected.has(source.id))
+        .map((source) => source.id),
+    }));
+    const calls: ScoreInput[] = [];
+    const originalScore = FixtureJudge.prototype.score;
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      calls.push(input);
+      return originalScore.call(this, input);
+    });
+    await cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: path.join(tmpDir('judgathon-frozen-unshown-'), 'repeat'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    expect(calls).toHaveLength(15);
+    for (const call of calls) {
+      expect((call.evidenceSet as { evidence: unknown[] }).evidence).toEqual(expected);
+    }
+    spy.mockRestore();
+  });
+
+  it('D04 saves usage before aborting on repeat auth failure', async () => {
+    const dir = tmpDir('judgathon-repeat-auth-');
+    const out = path.join(dir, 'repeat');
+    const originalScore = FixtureJudge.prototype.score;
+    let scoreCalls = 0;
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      scoreCalls += 1;
+      if (scoreCalls === 4) {
+        throw new ProviderError('auth', 'denied', { httpStatus: 401 });
+      }
+      return originalScore.call(this, input);
+    });
+
+    await expect(cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'PROVIDER_AUTH', exitCode: 3 });
+
+    const usage = JSON.parse(await fs.readFile(path.join(out, 'usage.json'), 'utf8')) as {
+      attempts: unknown[];
+    };
+    expect(usage.attempts).toHaveLength(4);
+    expect(scoreCalls).toBe(4);
+    expect(await fs.stat(path.join(out, 'runs', '03')).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it.each([
+    ['H01 rubric max_score', 'rubric.snapshot.json', (value: Record<string, unknown>) => {
+      const rubric = value.rubric as { criteria: Array<{ max_score: number }> };
+      rubric.criteria[0]!.max_score += 1;
+    }, 'INPUT_HASH_MISMATCH'],
+    ['H02 rubric anchor', 'rubric.snapshot.json', (value: Record<string, unknown>) => {
+      const rubric = value.rubric as { criteria: Array<{ anchors: Record<string, string> }> };
+      rubric.criteria[0]!.anchors['1'] += ' changed';
+    }, 'INPUT_HASH_MISMATCH'],
+    ['H03 config temperature', 'config.snapshot.json', (value: Record<string, unknown>) => {
+      const effective = value.effective as { judges: Array<{ temperature: number }> };
+      effective.judges[0]!.temperature = 1;
+    }, 'INPUT_HASH_MISMATCH'],
+    ['H04 config judge model', 'config.snapshot.json', (value: Record<string, unknown>) => {
+      const effective = value.effective as { judges: Array<{ model: string }> };
+      effective.judges[0]!.model += '-changed';
+    }, 'INPUT_HASH_MISMATCH'],
+    ['H07 selected frame order', 'evidence-set.json', (value: Record<string, unknown>) => {
+      (value.selected_frame_ids as string[]).reverse();
+    }, 'INPUT_INVALID'],
+    ['H09 judge schema hash', 'manifest.json', (value: Record<string, unknown>) => {
+      const frozen = value.frozen_inputs as { judge_schema_sha256: string };
+      frozen.judge_schema_sha256 = '0'.repeat(64);
+    }, 'INPUT_HASH_MISMATCH'],
+  ])('%s rejects tampered bundle before creating output', async (_name, file, mutate, code) => {
+    const dir = tmpDir('judgathon-frozen-tamper-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const filePath = path.join(copy, file);
+    const value = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    mutate(value as Record<string, unknown>);
+    await fs.writeFile(filePath, `${JSON.stringify(value)}\n`);
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: copy,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code, exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('H05 rejects modified frame bytes', async () => {
+    const dir = tmpDir('judgathon-frozen-frame-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const manifest = JSON.parse(await fs.readFile(path.join(copy, 'manifest.json'), 'utf8'));
+    const selectedId = manifest.frozen_inputs.selected_frames[0].frame_id;
+    const frame = manifest.media.frames.find((item: { frame_id: string }) => item.frame_id === selectedId);
+    await fs.appendFile(path.join(copy, frame.path), Buffer.from([0]));
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: copy,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'INPUT_HASH_MISMATCH', exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('H06 rejects modified frame timestamp', async () => {
+    const dir = tmpDir('judgathon-frozen-timestamp-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const manifestPath = path.join(copy, 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    const selectedId = manifest.frozen_inputs.selected_frames[0].frame_id;
+    const frame = manifest.media.frames.find((item: { frame_id: string }) => item.frame_id === selectedId);
+    frame.timestamp_ms += 1;
+    await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: copy,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'INPUT_HASH_MISMATCH', exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('H08 rejects modified judge prompt text', async () => {
+    const dir = tmpDir('judgathon-frozen-prompt-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const config = JSON.parse(await fs.readFile(path.join(copy, 'config.snapshot.json'), 'utf8'));
+    const promptPath = path.join(copy, config.effective.prompts.judge.path);
+    await fs.appendFile(promptPath, '\nchanged');
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: copy,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'INPUT_HASH_MISMATCH', exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it.each([
+    ['hash_version=1', (value: Record<string, unknown>) => {
+      (value.frozen_inputs as { hash_version: number }).hash_version = 1;
+    }],
+    ['hash_version absent', (value: Record<string, unknown>) => {
+      delete (value.frozen_inputs as Record<string, unknown>).hash_version;
+    }],
+    ['old frozen format', (value: Record<string, unknown>) => {
+      const frozen = value.frozen_inputs as { input_hash: string };
+      value.frozen_inputs = { input_hash: frozen.input_hash };
+    }],
+  ])('H10 %s is unsupported', async (_name, mutate) => {
+    const dir = tmpDir('judgathon-frozen-version-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const manifestPath = path.join(copy, 'manifest.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    mutate(manifest as Record<string, unknown>);
+    await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+    const sourceBundleFiles = [
+      'manifest.json',
+      'transcript.json',
+      'evidence-set.json',
+      'config.snapshot.json',
+      'rubric.snapshot.json',
+    ];
+    const before = await Promise.all(
+      sourceBundleFiles.map(async (file) => [file, await sha256File(path.join(copy, file))] as const),
+    );
+    const out = path.join(dir, 'repeat');
+    await expect(cmdRepeat({
+      fromDir: copy,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'UNSUPPORTED_FROZEN_INPUT_VERSION', exitCode: 2 });
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    for (const [file, hash] of before) {
+      expect(await sha256File(path.join(copy, file))).toBe(hash);
+    }
+  });
 });

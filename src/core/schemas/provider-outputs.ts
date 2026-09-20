@@ -14,7 +14,7 @@ export const transcriptOutputSchema = z
           start_ms: z.number().int(),
           end_ms: z.number().int(),
           text: z.string(),
-          confidence: z.number().nullable(),
+          confidence: z.null().optional(),
         })
         .strict(),
     ),
@@ -30,18 +30,18 @@ export const evidenceSourceSchema = z
   })
   .strict();
 
+export const evidenceItemSchema = z
+  .object({
+    kind: z.enum(['claim', 'observation', 'limitation', 'uncertainty']),
+    description: z.string(),
+    sources: z.array(evidenceSourceSchema).min(1),
+    criterion_hints: z.array(z.string()),
+  })
+  .strict();
+
 export const evidenceOutputSchema = z
   .object({
-    evidence: z.array(
-      z
-        .object({
-          kind: z.enum(['claim', 'observation', 'limitation', 'uncertainty']),
-          description: z.string(),
-          sources: z.array(evidenceSourceSchema).min(1),
-          criterion_hints: z.array(z.string()),
-        })
-        .strict(),
-    ),
+    evidence: z.array(evidenceItemSchema),
     injection_suspected: z.boolean(),
   })
   .strict();

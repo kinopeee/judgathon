@@ -70,12 +70,15 @@ export async function callWithAttempts<T>(
   let repairFeedback: string | undefined;
 
   for (let attempt = 0; attempt < ctx.maxAttempts; attempt++) {
-    if (ctx.deadlineMs !== undefined && ctx.now() > ctx.deadlineMs) {
-      throw new CliError(
-        'DEADLINE_EXCEEDED',
-        `run deadline exceeded before ${ctx.operation} attempt ${attempt}`,
-        3,
-        ctx.stage,
+    if (ctx.deadlineMs !== undefined && ctx.now() >= ctx.deadlineMs) {
+      throw Object.assign(
+        new CliError(
+          'DEADLINE_EXCEEDED',
+          `run deadline exceeded before ${ctx.operation} attempt ${attempt}`,
+          3,
+          ctx.stage,
+        ),
+        { attempts: [...attempts] },
       );
     }
     const started = ctx.now();

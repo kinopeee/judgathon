@@ -21,7 +21,7 @@ export interface TranscriptSegment {
   start_ms: number;
   end_ms: number;
   text: string;
-  asr_confidence: number | null;
+  asr_confidence: null;
 }
 
 export interface FrameRef {

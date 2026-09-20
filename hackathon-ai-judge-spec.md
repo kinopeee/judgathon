@@ -541,18 +541,18 @@ Physical device started moving
   "end_ms": 47390,
   "language": "ja",
   "text": "このアプリではAIがPull Requestを作る前に...",
-  "asr_confidence": 0.94,
+  "asr_confidence": null,
   "transcriber": {
     "provider": "google",
     "model": "gemini-3.8-flash",
-    "version": "transcribe-v1"
+    "version": "transcribe-v2"
   }
 }
 ```
 
 - `segment` は `pitch | qa`（§7.1）
 - `speaker` はMVPでは持たない。話者分離を導入した時点で追加する
-- `asr_confidence` はASRが返した値のみ保存する。未提供時は `null` とし、LLMに推測させない。採点の信頼度とは別物として扱う
+- `asr_confidence` は測定済みASR値のみ保存する。このPhase 0パイプラインは測定値を提供しないため、transcribe-v2では常に `null` とする。LLMに推測させず、採点の信頼度とは別物として扱う
 - Transcriptを生成したモデル・バージョンを保存し、再文字起こし時に区別できるようにする
 
 複数言語が混在することを前提とする（日本語 / 英語 / 韓国語など、イベント開催地の言語）。
@@ -2328,7 +2328,7 @@ ScoreCard JSON
 judgathon run \
   --video ./samples/team_alpha.mp4 \
   --rubric ./rubrics/hackathon-2026-v3.yaml \
-  --config ./configs/judge-google-v1.yaml \
+  --config ./configs/judge-google-v2.yaml \
   --output-language ja \
   --out ./out/team_alpha/
 
@@ -2519,7 +2519,7 @@ Explainable ranking
 ### 41.2 CLI、入力、終了コード
 
 ```bash
-pnpm exec judgathon run --video ./samples/team_alpha.mp4 --rubric ./rubrics/hackathon-2026-v3.yaml --config ./configs/judge-google-v1.yaml --output-language ja --provider-mode fixture --out ./out/team_alpha
+pnpm exec judgathon run --video ./samples/team_alpha.mp4 --rubric ./rubrics/hackathon-2026-v3.yaml --config ./configs/judge-google-v2.yaml --output-language ja --provider-mode fixture --out ./out/team_alpha
 pnpm exec judgathon repeat --from ./out/team_alpha --times 5 --provider-mode fixture --out ./out/team_alpha_repeat
 ```
 
@@ -2539,17 +2539,17 @@ pnpm exec judgathon repeat --from ./out/team_alpha --times 5 --provider-mode fix
 各出力ディレクトリに次を保存する。JSONはUTF-8、snake_case、schema_version=1を共通とし、内部TypeScriptのcamelCaseとは境界で明示変換する。時刻はUTC ISO 8601、メディア時刻は開始からの整数ミリ秒とする。
 
 - `manifest.json`: run_id、pitch_id、元ファイルSHA-256、duration_ms、mediaの相対path / MIME / byte_size / SHA-256、segment区間、全Frameのmetadata、使用したffmpeg versionと引数、status。
-- `config.snapshot.json` / `rubric.snapshot.json`: 秘密を除いた実効Config、Version ID、内容SHA-256。Prompt本文は`prompts/`にコピーし、path / version / SHA-256をmanifestに残す。
+- `config.snapshot.json` / `rubric.snapshot.json`: 秘密を除いた実効Config、Version ID、内容SHA-256。Prompt本文は`prompts/<role>/`（`transcriber` / `evidence_extractor` / `judge`）にコピーし、path / version / SHA-256をmanifestに残す。
 - `media/audio.wav` / `media/frames/`: 正規化した音声と抽出画像。音声とFrameの原点を揃え、`0 <= start_ms < end_ms <= duration_ms`、`0 <= timestamp_ms < duration_ms`を検証する。
-- `transcript.json`: TranscriptVersion IDとsegments。Providerがtimestampを返せない・範囲を逸脱する場合は推測値で通さず検証失敗とする。language不明はund、asr_confidence未提供はnull。意味の通る文字起こしが空の場合は採点へ進めずNO_TRANSCRIPTとする。
+- `transcript.json`: TranscriptVersion IDとsegments。Providerがtimestampを返せない・範囲を逸脱する場合は推測値で通さず検証失敗とする。標準Configはjudge-google-v2で、transcribe-v2の`confidence`はnullのみ（省略も可）を受理し、numeric/stringは検証失敗とする。保存する`asr_confidence`は常にnullで、意味の通る文字起こしが空の場合は採点へ進めずNO_TRANSCRIPTとする。
 - `evidence-set.json`: §11に加えて、recorded_media_id、input_frame_ids、selected_frame_ids、config / rubric / transcriptのVersion ID、Prompt hash、injection_suspectedとそのsource_refsを保存する。空Evidenceは許可するが空Transcriptとは区別する。
 - `judge-run.json`: phase=provisional、3つのsample_indexと各試行、実効モデル設定、status、input hash。`attempts/`にはProviderの出力本文と検証エラーを保存し、Authorization headerなど通信資格情報は保存しない。
 - `scorecard.json`: §13のシステム保存形式に加え、全検証済みサンプル、representative_sample_index、review_flags、normalized_total_scoreを保持する。
-- `usage.json`: 全試行のoperation・latency・token / audio / image usage・料金表版・推定USD。未提供値はnull、fixtureはmode=fixtureとし実費として扱わない。
+- `usage.json`: 全試行のoperation・latency・token / audio / image usage・料金表版・推定USD。`calculation_version`は`gemini-output-plus-thinking-v2`とし、推定費用は`input_tokens * input_rate / 1e6 + (output_tokens + thinking_tokens) * output_rate / 1e6`で計算する。未提供値はnull、fixtureはmode=fixtureとし実費として扱わない。
 
 IDはシステムが発行し、全runを跨いで一意なprefix付きIDとする。LLMは発行済みsource IDを引用し、EvidenceのIDは検証後にシステムが付ける。中間生成物は一時ファイルからatomic renameし、manifest.status=completedは全成果物の保存後にのみ設定する。失敗時はstatus=failedとstageを保存し、完成済みの別runを変更しない。入力検証で出力先を確保する前の失敗はstderrとstdoutのエラーJSONだけを返し、既存ディレクトリへ失敗manifestを書き込まない。
 
-再現とは保存済みScoreCardの再集計・参照・監査ができることを指す。LLM再呼び出しで同一値が返ることまでは保証しない。`repeat --from`は凍結済みの前処理成果物・Prompt・Config hashを検証し、Judgeだけを5回独立実行する。元の成果物は変更しない。
+再現とは保存済みScoreCardの再集計・参照・監査ができることを指す。LLM再呼び出しで同一値が返ることまでは保証しない。`repeat --from`は凍結済みの前処理成果物・Prompt・Config hashを検証し、Judgeだけを5回独立実行する。元の成果物は変更しない。`frozen_inputs.hash_version`が2でない旧runは`UNSUPPORTED_FROZEN_INPUT_VERSION`で拒否し、旧runを変更せず現行CLIで新しいrunを作成する。v2はtranscript/evidence-set/config/rubric snapshot hash、順序付きselected frame（ID・timestamp・SHA-256）、3つのPrompt hash、judge schema hash、正規化した追加review flag、composite `input_hash`を保存する。
 
 ### 41.4 Frame選択とEvidenceの整合性
 
@@ -2611,7 +2611,7 @@ pnpm test:coverage
 pnpm build
 ```
 
-コマンドは本仕様の時点では未実装。実装者はpackage.jsonに対応するscriptを用意し、クリーン環境でfixtureモードのCLI実行まで確認する。完了報告には実行コマンド・終了コード・成果物の場所・未検証事項・実APIコストを含める。
+`pnpm build`後は`pnpm exec judgathon`または`scripts/judgathon.mjs`でCLIを実行する。`dist/cli/index.js`がない状態ではlauncherは自動buildや自動installを行わず、`BUILD_REQUIRED: dist/cli/index.js not found. Run \`pnpm build\` first.`をstderrに1行出して終了コード2を返す。実装者はクリーン環境でfixtureモードのCLI実行まで確認する。完了報告には実行コマンド・終了コード・成果物の場所・未検証事項・実APIコストを含める。
 
 ---
 

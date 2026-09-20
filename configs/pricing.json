@@ -1,12 +1,11 @@
 {
-  "_comment": "USD per 1M tokens, Gemini API Standard paid tier. Source: https://ai.google.dev/gemini-api/docs/pricing fetched 2026-09-19. Input price applies to all input modalities (text/audio/image). Output price includes thinking tokens. If usage is unknown, cost must be reported as null, never 0.",
+  "_comment": "USD per 1M tokens, Gemini API Standard paid tier. Source: https://ai.google.dev/gemini-api/docs/pricing fetched 2026-09-19. Input price applies to all input modalities (text/audio/image). Output price applies to candidates + thinking tokens. usage.output_tokens = candidatesTokenCount and usage.thinking_tokens = thoughtsTokenCount. If usage is unknown, cost must be reported as null, never 0.",
   "currency": "USD",
   "models": {
     "gemini-3.8-flash": {
       "valid_until": "2026-12-31",
       "input_per_1m_tokens": 0.75,
-      "output_per_1m_tokens": 3.75,
-      "output_includes_thinking": true
+      "output_per_1m_tokens": 3.75
     }
   }
 }

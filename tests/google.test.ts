@@ -137,7 +137,7 @@ describe('google adapter (mocked SDK)', () => {
     const audio = path.join(dir, 'a.wav');
     await fs.writeFile(audio, 'RIFF');
     const tr = new GoogleTranscriber(
-      { provider: 'google', model: 'm', prompt_version: 'transcribe-v1' },
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
       { apiKey: 'x' },
     );
     await tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} });

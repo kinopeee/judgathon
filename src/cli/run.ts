@@ -24,6 +24,13 @@ import {
   type RawScoreOutput,
 } from '../core/schemas/provider-outputs.js';
 import {
+  frozenInputsV2Schema,
+  storedConfigSnapshotSchema,
+  storedEvidenceSetSchema,
+  storedRubricSnapshotSchema,
+  storedTranscriptSchema,
+} from '../core/schemas/artifacts.js';
+import {
   validateEvidenceOutput,
   validateScoreOutput,
   validateTranscriptOutput,
@@ -35,7 +42,7 @@ import {
   type FrameCandidate,
 } from '../core/frame-selection.js';
 import { callWithAttempts, type AttemptRecord, type AttemptSuccess } from '../core/retry.js';
-import { computeInputHash } from '../core/input-hash.js';
+import { computeInputHash, judgeSchemaSha256, normalizeReviewFlags } from '../core/input-hash.js';
 import {
   fileExists,
   isAbsentOrEmptyDir,
@@ -401,13 +408,13 @@ export async function cmdRun(opts: RunOptions): Promise<{
     throw new CliError('FIXTURE_NOT_FOUND', `fixture dir not found: ${opts.fixtureDir}`, 2, 'validate_input');
   }
 
-  const prompts: Record<'transcriber' | 'extractor' | 'judge', PromptRef> = {
+  const prompts: Record<'transcriber' | 'evidence_extractor' | 'judge', PromptRef> = {
     transcriber: await loadPrompt(opts.promptsDir, config.transcriber.prompt_version),
-    extractor: await loadPrompt(opts.promptsDir, config.evidence_extractor.prompt_version),
+    evidence_extractor: await loadPrompt(opts.promptsDir, config.evidence_extractor.prompt_version),
     judge: await loadPrompt(opts.promptsDir, config.judges[0]!.prompt_version),
   };
-  prompts.extractor.text = fillPrompt(prompts.extractor.text, { output_language: outputLanguage });
-  prompts.extractor.sha256 = sha256Hex(prompts.extractor.text);
+  prompts.evidence_extractor.text = fillPrompt(prompts.evidence_extractor.text, { output_language: outputLanguage });
+  prompts.evidence_extractor.sha256 = sha256Hex(prompts.evidence_extractor.text);
   prompts.judge.text = fillPrompt(prompts.judge.text, { output_language: outputLanguage });
   prompts.judge.sha256 = sha256Hex(prompts.judge.text);
 
@@ -585,12 +592,12 @@ export async function cmdRun(opts: RunOptions): Promise<{
       start_ms: s.start_ms,
       end_ms: s.end_ms,
       text: s.text,
-      asr_confidence: s.confidence,
+      asr_confidence: null,
     }));
     transcriptIds = segments.map((s) => s.id);
     const transcriptVersionId = newTranscriptVersionId();
     const recordedMediaId = newMediaId();
-    const transcriptJson = {
+    const transcriptJson = storedTranscriptSchema.parse({
       schema_version: 1,
       transcript_version_id: transcriptVersionId,
       recorded_media_id: recordedMediaId,
@@ -601,7 +608,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
         model_version: transcriptRes.result.modelVersion,
       },
       prompt_sha256: prompts.transcriber.sha256,
-    };
+    });
 
     const nonBlank = segments.filter((s) => s.text.trim().length > 0);
     if (nonBlank.length === 0) {
@@ -637,7 +644,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
       },
       (repairFeedback) =>
         providers.extractor.extract({
-          promptText: prompts.extractor.text,
+          promptText: prompts.evidence_extractor.text,
           transcriptSegments: segments,
           ...(repairFeedback !== undefined ? { repairFeedback } : {}),
           frames: inputFrames.map((f) => ({
@@ -680,13 +687,24 @@ export async function cmdRun(opts: RunOptions): Promise<{
       config.frame_selection.max_frames_per_pitch,
     );
     if (selection.frame_reference_overflow) reviewFlagsExtra.push('frame_reference_overflow');
-    const selectedFrames = frames.filter((f) => selection.selected_frame_ids.includes(f.frame_id));
+    const selectedFrames = selection.selected_frame_ids.map((frameId) => {
+      const frame = frames.find((f) => f.frame_id === frameId);
+      if (!frame) {
+        throw new CliError(
+          'INPUT_INVALID',
+          `selected frame ${frameId} missing from extracted frames`,
+          2,
+          'evidence',
+        );
+      }
+      return frame;
+    });
 
     const evidenceSetId = newEvidenceSetId();
     const injectionSourceRefs = evRes.value.injection_suspected
       ? evidenceItems.flatMap((e) => e.sources)
       : [];
-    const evidenceSetJson = {
+    const evidenceSetJson = storedEvidenceSetSchema.parse({
       schema_version: 1,
       evidence_set_id: evidenceSetId,
       pitch_id: pitchId,
@@ -708,37 +726,88 @@ export async function cmdRun(opts: RunOptions): Promise<{
       evidence_ids: evidenceIds,
       injection_suspected: evRes.value.injection_suspected,
       injection_source_refs: injectionSourceRefs,
-      prompt_sha256: prompts.extractor.sha256,
+      prompt_sha256: prompts.evidence_extractor.sha256,
       created_at: new Date().toISOString(),
-    };
+    });
     await writeJsonAtomic(path.join(outDir, 'evidence-set.json'), evidenceSetJson);
     manifest['stage'] = 'evidence_done';
+    await writeJsonAtomic(manifestPath, manifest);
+
+    // Freeze all judge inputs before the first provider call.
+    const promptsOutDir = path.join(outDir, 'prompts');
+    for (const [role, p] of Object.entries(prompts)) {
+      await writeTextAtomic(path.join(promptsOutDir, role, `${p.version}.md`), p.text);
+    }
+    const configSnapshot = storedConfigSnapshotSchema.parse({
+      schema_version: 1,
+      config_id: config.id,
+      config_sha256: configSha,
+      effective: {
+        ...config,
+        phash: { implementation: PHASH_IMPLEMENTATION },
+        sampling: { fps: 1, max_long_edge: 1280, format: 'jpeg' },
+        prompts: {
+          transcriber: {
+            path: `prompts/transcriber/${prompts.transcriber.version}.md`,
+            version: prompts.transcriber.version,
+            sha256: prompts.transcriber.sha256,
+          },
+          evidence_extractor: {
+            path: `prompts/evidence_extractor/${prompts.evidence_extractor.version}.md`,
+            version: prompts.evidence_extractor.version,
+            sha256: prompts.evidence_extractor.sha256,
+          },
+          judge: {
+            path: `prompts/judge/${prompts.judge.version}.md`,
+            version: prompts.judge.version,
+            sha256: prompts.judge.sha256,
+          },
+        },
+        provider_mode: providers.mode,
+      },
+    });
+    const rubricSnapshot = storedRubricSnapshotSchema.parse({
+      schema_version: 1,
+      rubric_version_id: `${rubric.id}:${rubricSha.slice(0, 16)}`,
+      rubric_sha256: rubricSha,
+      rubric,
+    });
+    await writeJsonAtomic(path.join(outDir, 'config.snapshot.json'), configSnapshot);
+    await writeJsonAtomic(path.join(outDir, 'rubric.snapshot.json'), rubricSnapshot);
+
+    const transcriptSha256 = await sha256File(path.join(outDir, 'transcript.json'));
+    const evidenceSetSha256 = await sha256File(path.join(outDir, 'evidence-set.json'));
+    const configSnapshotSha256 = await sha256File(path.join(outDir, 'config.snapshot.json'));
+    const rubricSnapshotSha256 = await sha256File(path.join(outDir, 'rubric.snapshot.json'));
+    const selectedFrameHashes = selectedFrames.map((f) => ({
+      frame_id: f.frame_id,
+      timestamp_ms: f.timestamp_ms,
+      sha256: f.sha256,
+    }));
+    const reviewFlags = normalizeReviewFlags(reviewFlagsExtra);
+    const frozenInputsWithoutHash = {
+      hash_version: 2 as const,
+      transcript_sha256: transcriptSha256,
+      evidence_set_sha256: evidenceSetSha256,
+      config_snapshot_sha256: configSnapshotSha256,
+      rubric_snapshot_sha256: rubricSnapshotSha256,
+      selected_frames: selectedFrameHashes,
+      prompt_hashes: {
+        transcriber: prompts.transcriber.sha256,
+        evidence_extractor: prompts.evidence_extractor.sha256,
+        judge: prompts.judge.sha256,
+      },
+      judge_schema_sha256: judgeSchemaSha256(),
+      review_flags_extra: reviewFlags,
+    };
+    const inputHash = computeInputHash(frozenInputsWithoutHash);
+    const frozenInputs = frozenInputsV2Schema.parse({ ...frozenInputsWithoutHash, input_hash: inputHash });
+    manifest['frozen_inputs'] = frozenInputs;
     await writeJsonAtomic(manifestPath, manifest);
 
     // Stage: judge
     log('[judge] scoring (3 samples)');
     const evidenceForPrompt = buildEvidenceForPrompt(evidenceItems, selection.unshown_source_ids);
-    // Frozen-input hash components are computed from the WRITTEN files so
-    // repeat's verification covers exactly what was persisted.
-    const transcriptSha256 = await sha256File(path.join(outDir, 'transcript.json'));
-    const evidenceSetSha256 = await sha256File(path.join(outDir, 'evidence-set.json'));
-    const inputHash = computeInputHash({
-      transcriptSha256,
-      evidenceSetSha256,
-      selectedFrameSha256s: selectedFrames.map((f) => f.sha256),
-      rubricSha256: rubricSha,
-      configSha256: configSha,
-      judgePromptSha256: prompts.judge.sha256,
-    });
-    manifest['frozen_inputs'] = {
-      transcript_sha256: transcriptSha256,
-      evidence_set_sha256: evidenceSetSha256,
-      selected_frame_ids: selection.selected_frame_ids,
-      rubric_sha256: rubricSha,
-      config_sha256: configSha,
-      judge_prompt_sha256: prompts.judge.sha256,
-      input_hash: inputHash,
-    };
 
     const judgeRunId = newJudgeRunId();
     const judgeRes = await runJudgeStage({
@@ -779,36 +848,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
     await writeJsonAtomic(manifestPath, manifest);
 
     // Stage: finalize
-    log('[finalize] writing snapshots and manifest');
-    const promptsOutDir = path.join(outDir, 'prompts');
-    for (const p of Object.values(prompts)) {
-      await writeTextAtomic(path.join(promptsOutDir, `${p.version}.md`), p.text);
-    }
-    const configSnapshot = {
-      schema_version: 1,
-      config_id: config.id,
-      config_sha256: configSha,
-      effective: {
-        ...config,
-        phash: { implementation: PHASH_IMPLEMENTATION },
-        sampling: { fps: 1, max_long_edge: 1280, format: 'jpeg' },
-        prompts: {
-          transcriber: { path: `prompts/${prompts.transcriber.version}.md`, version: prompts.transcriber.version, sha256: prompts.transcriber.sha256 },
-          evidence_extractor: { path: `prompts/${prompts.extractor.version}.md`, version: prompts.extractor.version, sha256: prompts.extractor.sha256 },
-          judge: { path: `prompts/${prompts.judge.version}.md`, version: prompts.judge.version, sha256: prompts.judge.sha256 },
-        },
-        provider_mode: providers.mode,
-      },
-    };
-    const rubricSnapshot = {
-      schema_version: 1,
-      rubric_version_id: `${rubric.id}:${rubricSha.slice(0, 16)}`,
-      rubric_sha256: rubricSha,
-      rubric,
-    };
-    await writeJsonAtomic(path.join(outDir, 'config.snapshot.json'), configSnapshot);
-    await writeJsonAtomic(path.join(outDir, 'rubric.snapshot.json'), rubricSnapshot);
-
+    log('[finalize] writing manifest');
     await writeJsonAtomic(
       path.join(outDir, 'usage.json'),
       usageDoc(providers, completedAttempts, config, pricing),
