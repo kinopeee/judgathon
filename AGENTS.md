@@ -41,7 +41,7 @@
 
 - **Frozen inputs**: `frozen_inputs.hash_version: 2`。`input_hash` は transcript / evidence-set / config・rubric snapshot / 選択フレーム（順序込み）/ 全プロンプトハッシュ / judge スキーマハッシュを含む。ハッシュやシリアライズの変更は破壊的変更であり、PR で明示する
 - **Artifact 形式**: 永続化 JSON はすべて snake_case、`schema_version` 付き、`writeJsonAtomic` / `writeTextAtomic`（tmp + rename）による原子書き込み。artifact JSON の直接 `fs.writeFile` は禁止
-- **終了コード**: CLI 失敗は `CliError` 経由で 0/2/3/4/5（`src/core/errors.ts`）。ad-hoc な `process.exit` や README 未記載の新コードは禁止
+- **終了コード**: 成功は `0`、CLI 失敗は `CliError` 経由で `2/3/4/5`（`src/core/errors.ts`）。ad-hoc な `process.exit` や README 未記載の新コードは禁止
 - **fixture モード**: ネットワークアクセスも credential 参照も行わない
 - **live モード**: `GOOGLE_API_KEY` をディスク・ログに書かない。SDK リトライ無効（`attempts=1`）・120 s タイムアウトを維持
 - **Usage 集計**: `calculation_version: gemini-output-plus-thinking-v2`。必須トークン数が不明なら推定コストは `null`（部分推定しない）
@@ -92,7 +92,7 @@ pnpm exec judgathon repeat --from ./out/team_alpha --times 5 \
 
 ## 変更時チェックリスト
 
-- [ ] `pnpm typecheck` / `pnpm lint` / `pnpm build` / `pnpm test` が通る
+- [ ] `pnpm typecheck` / `pnpm lint` / `pnpm build` / `pnpm test:coverage` が通る
 - [ ] 不変条件（hash、artifact 形式、終了コード、provider 境界）を壊していない
 - [ ] ハッシュ・シリアライズ変更がある場合、破壊的変更として PR に明記した
 - [ ] 秘密情報をコミット・ログ出力していない
