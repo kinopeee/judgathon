@@ -348,8 +348,8 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
   const allAttempts: AttemptRecord[] = [];
   const criterionIds = rubric.criteria.map((c) => c.id);
   const pricing = await loadPricing(opts.pricingPath).catch(() => null);
-  const finishUsage = async (): Promise<void> => {
-    try {
+  const finishUsage = async (bestEffort: boolean): Promise<void> => {
+    const write = async (): Promise<void> => {
       await writeJsonAtomic(
         path.join(opts.outDir, 'usage.json'),
         buildUsageReport(
@@ -368,9 +368,16 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           pricing?.table ?? null,
         ),
       );
-    } catch {
-      // Never mask the original repeat result with a usage-write failure.
+    };
+    if (bestEffort) {
+      try {
+        await write();
+      } catch {
+        // Never mask the original repeat result with a usage-write failure.
+      }
+      return;
     }
+    await write();
   };
 
   try {
@@ -466,11 +473,11 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
     });
     const reportPath = path.join(opts.outDir, 'repeat-report.json');
     await writeJsonAtomic(reportPath, report);
-    await finishUsage();
+    await finishUsage(false);
 
     return { status: report['status'] as 'pass' | 'fail' | 'not_evaluated', reportPath };
   } catch (err) {
-    await finishUsage();
+    await finishUsage(true);
     throw err;
   }
 }

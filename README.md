@@ -86,7 +86,7 @@ schemas, a 120 s per-attempt timeout, and the Files API for audio upload.
 ## Output layout
 
 `manifest.json` (status last), `config.snapshot.json`, `rubric.snapshot.json`,
-`prompts/*.md`, `media/audio.wav`, `media/frames/`, `transcript.json`,
+`prompts/<role>/*.md`, `media/audio.wav`, `media/frames/`, `transcript.json`,
 `evidence-set.json`, `judge-run.json`, `attempts/`, `scorecard.json`,
 `usage.json`, `evidence-audit.json`. All JSON is snake_case, `schema_version: 1`,
 atomic writes via tmp+rename.

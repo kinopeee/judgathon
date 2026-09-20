@@ -7,6 +7,7 @@ import { FixtureJudge } from '../src/providers/fixture/index.js';
 import type { ScoreInput } from '../src/providers/types.js';
 import { cmdRepeat } from '../src/cli/repeat.js';
 import { cmdRun } from '../src/cli/run.js';
+import * as storage from '../src/core/storage.js';
 import { sha256File } from '../src/core/storage.js';
 import { ProviderError } from '../src/core/errors.js';
 
@@ -257,9 +258,93 @@ describe('frozen inputs v2', () => {
   });
 
   it('A04 uses the v2 transcription prompt', async () => {
-    const prompt = await fs.readFile(path.join(sourceDir, 'prompts', 'transcribe-v2.md'), 'utf8');
+    const prompt = await fs.readFile(
+      path.join(sourceDir, 'prompts', 'transcriber', 'transcribe-v2.md'),
+      'utf8',
+    );
     expect(prompt.toLowerCase()).toContain('null');
     expect(prompt.toLowerCase()).not.toContain('your confidence');
+  });
+
+  it('keeps role-specific prompt snapshots when versions are shared', async () => {
+    const dir = await tmpDir('judgathon-shared-prompt-');
+    const configPath = path.join(dir, 'config.yaml');
+    const configText = await fs.readFile(path.join(ROOT, 'configs/judge-google-v2.yaml'), 'utf8');
+    await fs.writeFile(
+      configPath,
+      configText
+        .replace('id: judge-google-v2', 'id: judge-google-shared-prompt')
+        .replace('prompt_version: absolute-score-v1', 'prompt_version: transcribe-v2'),
+    );
+    const runDir = path.join(dir, 'run');
+    await cmdRun({
+      video: sampleVideo(),
+      rubricPath: path.join(ROOT, 'rubrics/hackathon-2026-v3.yaml'),
+      configPath,
+      outDir: runDir,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      videoSource: 'screen',
+      promptsDir: path.join(ROOT, 'prompts'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    const snapshot = JSON.parse(
+      await fs.readFile(path.join(runDir, 'config.snapshot.json'), 'utf8'),
+    ) as {
+      effective: {
+        prompts: {
+          transcriber: { path: string };
+          evidence_extractor: { path: string };
+          judge: { path: string };
+        };
+      };
+    };
+    expect(snapshot.effective.prompts.transcriber.path).toBe('prompts/transcriber/transcribe-v2.md');
+    expect(snapshot.effective.prompts.judge.path).toBe('prompts/judge/transcribe-v2.md');
+    const transcriberPrompt = await fs.readFile(
+      path.join(runDir, snapshot.effective.prompts.transcriber.path),
+      'utf8',
+    );
+    const judgePrompt = await fs.readFile(
+      path.join(runDir, snapshot.effective.prompts.judge.path),
+      'utf8',
+    );
+    expect(transcriberPrompt).not.toBe(judgePrompt);
+
+    const repeatDir = path.join(dir, 'repeat');
+    const repeat = await cmdRepeat({
+      fromDir: runDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: repeatDir,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    expect(repeat.status).toBe('pass');
+  });
+
+  it('propagates a usage-write failure after a successful repeat', async () => {
+    const out = path.join(tmpDir('judgathon-usage-write-'), 'repeat');
+    const writeJsonAtomic = storage.writeJsonAtomic;
+    const writeSpy = vi.spyOn(storage, 'writeJsonAtomic').mockImplementation(async (filePath, value) => {
+      if (filePath.endsWith(path.join('', 'usage.json'))) {
+        throw new Error('usage write failed');
+      }
+      await writeJsonAtomic(filePath, value);
+    });
+    await expect(cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    })).rejects.toThrow('usage write failed');
+    expect(writeSpy).toHaveBeenCalled();
+    writeSpy.mockRestore();
   });
 
   it('F01 preserves every judge input across run and repeat', async () => {

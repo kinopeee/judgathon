@@ -2539,7 +2539,7 @@ pnpm exec judgathon repeat --from ./out/team_alpha --times 5 --provider-mode fix
 各出力ディレクトリに次を保存する。JSONはUTF-8、snake_case、schema_version=1を共通とし、内部TypeScriptのcamelCaseとは境界で明示変換する。時刻はUTC ISO 8601、メディア時刻は開始からの整数ミリ秒とする。
 
 - `manifest.json`: run_id、pitch_id、元ファイルSHA-256、duration_ms、mediaの相対path / MIME / byte_size / SHA-256、segment区間、全Frameのmetadata、使用したffmpeg versionと引数、status。
-- `config.snapshot.json` / `rubric.snapshot.json`: 秘密を除いた実効Config、Version ID、内容SHA-256。Prompt本文は`prompts/`にコピーし、path / version / SHA-256をmanifestに残す。
+- `config.snapshot.json` / `rubric.snapshot.json`: 秘密を除いた実効Config、Version ID、内容SHA-256。Prompt本文は`prompts/<role>/`（`transcriber` / `evidence_extractor` / `judge`）にコピーし、path / version / SHA-256をmanifestに残す。
 - `media/audio.wav` / `media/frames/`: 正規化した音声と抽出画像。音声とFrameの原点を揃え、`0 <= start_ms < end_ms <= duration_ms`、`0 <= timestamp_ms < duration_ms`を検証する。
 - `transcript.json`: TranscriptVersion IDとsegments。Providerがtimestampを返せない・範囲を逸脱する場合は推測値で通さず検証失敗とする。標準Configはjudge-google-v2で、transcribe-v2の`confidence`はnullのみ（省略も可）を受理し、numeric/stringは検証失敗とする。保存する`asr_confidence`は常にnullで、意味の通る文字起こしが空の場合は採点へ進めずNO_TRANSCRIPTとする。
 - `evidence-set.json`: §11に加えて、recorded_media_id、input_frame_ids、selected_frame_ids、config / rubric / transcriptのVersion ID、Prompt hash、injection_suspectedとそのsource_refsを保存する。空Evidenceは許可するが空Transcriptとは区別する。

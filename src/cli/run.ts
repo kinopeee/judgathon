@@ -408,13 +408,13 @@ export async function cmdRun(opts: RunOptions): Promise<{
     throw new CliError('FIXTURE_NOT_FOUND', `fixture dir not found: ${opts.fixtureDir}`, 2, 'validate_input');
   }
 
-  const prompts: Record<'transcriber' | 'extractor' | 'judge', PromptRef> = {
+  const prompts: Record<'transcriber' | 'evidence_extractor' | 'judge', PromptRef> = {
     transcriber: await loadPrompt(opts.promptsDir, config.transcriber.prompt_version),
-    extractor: await loadPrompt(opts.promptsDir, config.evidence_extractor.prompt_version),
+    evidence_extractor: await loadPrompt(opts.promptsDir, config.evidence_extractor.prompt_version),
     judge: await loadPrompt(opts.promptsDir, config.judges[0]!.prompt_version),
   };
-  prompts.extractor.text = fillPrompt(prompts.extractor.text, { output_language: outputLanguage });
-  prompts.extractor.sha256 = sha256Hex(prompts.extractor.text);
+  prompts.evidence_extractor.text = fillPrompt(prompts.evidence_extractor.text, { output_language: outputLanguage });
+  prompts.evidence_extractor.sha256 = sha256Hex(prompts.evidence_extractor.text);
   prompts.judge.text = fillPrompt(prompts.judge.text, { output_language: outputLanguage });
   prompts.judge.sha256 = sha256Hex(prompts.judge.text);
 
@@ -644,7 +644,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
       },
       (repairFeedback) =>
         providers.extractor.extract({
-          promptText: prompts.extractor.text,
+          promptText: prompts.evidence_extractor.text,
           transcriptSegments: segments,
           ...(repairFeedback !== undefined ? { repairFeedback } : {}),
           frames: inputFrames.map((f) => ({
@@ -726,7 +726,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
       evidence_ids: evidenceIds,
       injection_suspected: evRes.value.injection_suspected,
       injection_source_refs: injectionSourceRefs,
-      prompt_sha256: prompts.extractor.sha256,
+      prompt_sha256: prompts.evidence_extractor.sha256,
       created_at: new Date().toISOString(),
     });
     await writeJsonAtomic(path.join(outDir, 'evidence-set.json'), evidenceSetJson);
@@ -735,8 +735,8 @@ export async function cmdRun(opts: RunOptions): Promise<{
 
     // Freeze all judge inputs before the first provider call.
     const promptsOutDir = path.join(outDir, 'prompts');
-    for (const p of Object.values(prompts)) {
-      await writeTextAtomic(path.join(promptsOutDir, `${p.version}.md`), p.text);
+    for (const [role, p] of Object.entries(prompts)) {
+      await writeTextAtomic(path.join(promptsOutDir, role, `${p.version}.md`), p.text);
     }
     const configSnapshot = storedConfigSnapshotSchema.parse({
       schema_version: 1,
@@ -748,17 +748,17 @@ export async function cmdRun(opts: RunOptions): Promise<{
         sampling: { fps: 1, max_long_edge: 1280, format: 'jpeg' },
         prompts: {
           transcriber: {
-            path: `prompts/${prompts.transcriber.version}.md`,
+            path: `prompts/transcriber/${prompts.transcriber.version}.md`,
             version: prompts.transcriber.version,
             sha256: prompts.transcriber.sha256,
           },
           evidence_extractor: {
-            path: `prompts/${prompts.extractor.version}.md`,
-            version: prompts.extractor.version,
-            sha256: prompts.extractor.sha256,
+            path: `prompts/evidence_extractor/${prompts.evidence_extractor.version}.md`,
+            version: prompts.evidence_extractor.version,
+            sha256: prompts.evidence_extractor.sha256,
           },
           judge: {
-            path: `prompts/${prompts.judge.version}.md`,
+            path: `prompts/judge/${prompts.judge.version}.md`,
             version: prompts.judge.version,
             sha256: prompts.judge.sha256,
           },
@@ -794,7 +794,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
       selected_frames: selectedFrameHashes,
       prompt_hashes: {
         transcriber: prompts.transcriber.sha256,
-        evidence_extractor: prompts.extractor.sha256,
+        evidence_extractor: prompts.evidence_extractor.sha256,
         judge: prompts.judge.sha256,
       },
       judge_schema_sha256: judgeSchemaSha256(),
