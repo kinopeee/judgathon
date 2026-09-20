@@ -609,7 +609,13 @@ describe('frozen inputs v2', () => {
           fixtureDir: path.join(ROOT, 'fixtures/default'),
           outDir: out,
           pricingPath: path.join(ROOT, 'configs/pricing.json'),
-          log: () => {},
+          // And the diagnostic logger itself throws: even that must not mask
+          // the primary failure.
+          log: (line) => {
+            if (line.includes('failed to write failed manifest')) {
+              throw new Error('log failed');
+            }
+          },
         });
         // Then the secondary failure does not mask the primary error: the run
         // is recorded failed exactly once and the remaining runs still execute

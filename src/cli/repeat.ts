@@ -420,11 +420,15 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
         try {
           await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
         } catch (saveErr) {
-          log(
-            `[repeat] failed to write failed manifest for run ${idx}: ${
-              saveErr instanceof Error ? saveErr.message : String(saveErr)
-            }`,
-          );
+          try {
+            log(
+              `[repeat] failed to write failed manifest for run ${idx}: ${
+                saveErr instanceof Error ? saveErr.message : String(saveErr)
+              }`,
+            );
+          } catch {
+            // Diagnostic logging must not mask the primary run failure.
+          }
         }
       };
       try {
