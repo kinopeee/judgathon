@@ -446,11 +446,14 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           childManifest['stage'] = 'judge';
           throw err instanceof CliError
             ? err
-            : new CliError(
-                'INTERNAL_ERROR',
-                err instanceof Error ? err.message : String(err),
-                3,
-                'judge',
+            : Object.assign(
+                new CliError(
+                  'INTERNAL_ERROR',
+                  err instanceof Error ? err.message : String(err),
+                  3,
+                  'judge',
+                ),
+                { cause: err },
               );
         }
         perRunLevels.push(levels);
