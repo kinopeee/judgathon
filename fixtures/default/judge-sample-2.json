@@ -1,0 +1,49 @@
+{
+  "criteria": [
+    {
+      "criterion_id": "problem_value",
+      "level": 4,
+      "evidence_strength": "partial",
+      "evidence_ids": ["ev#0", "tr#1"],
+      "reason": "The problem and its cost are described concretely, though supporting figures are not shown."
+    },
+    {
+      "criterion_id": "originality",
+      "level": 4,
+      "evidence_strength": "partial",
+      "evidence_ids": ["ev#1"],
+      "reason": "An on-device extraction approach is a novel framing for this problem."
+    },
+    {
+      "criterion_id": "technical_execution",
+      "level": 4,
+      "evidence_strength": "strong",
+      "evidence_ids": ["ev#1", "ev#2", "ev#5", "frame#30"],
+      "reason": "A working web UI and an architecture slide were observed, matching the implementation claims."
+    },
+    {
+      "criterion_id": "demo",
+      "level": 4,
+      "evidence_strength": "strong",
+      "evidence_ids": ["ev#3", "ev#2"],
+      "reason": "A live demo of the main flow (record sentence -> task appears) was shown end to end."
+    },
+    {
+      "criterion_id": "feasibility",
+      "level": 4,
+      "evidence_strength": "partial",
+      "evidence_ids": ["ev#4", "tr#4"],
+      "reason": "Concrete next steps (calendar integration, three-team beta) were stated."
+    },
+    {
+      "criterion_id": "pitch_clarity",
+      "level": 4,
+      "evidence_strength": "partial",
+      "evidence_ids": ["tr#0", "tr#1", "tr#3"],
+      "reason": "Problem -> solution -> demo flow was consistent throughout the pitch."
+    }
+  ],
+  "summary": "A clearly structured pitch with a working demo and concrete next steps.",
+  "uncertainties": ["No scale or performance figures were shown."],
+  "injection_suspected": false
+}

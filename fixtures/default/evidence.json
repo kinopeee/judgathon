@@ -1,0 +1,41 @@
+{
+  "evidence": [
+    {
+      "kind": "claim",
+      "description": "The presenter states that meeting action items are frequently lost because nobody owns them.",
+      "sources": [{ "type": "transcript", "id": "tr#1" }],
+      "criterion_hints": ["problem_value"]
+    },
+    {
+      "kind": "claim",
+      "description": "The presenter claims an on-device model extracts tasks and syncs them to an issue tracker.",
+      "sources": [{ "type": "transcript", "id": "tr#2" }],
+      "criterion_hints": ["originality", "technical_execution"]
+    },
+    {
+      "kind": "observation",
+      "description": "A web application UI is shown on screen with a task list.",
+      "sources": [{ "type": "frame", "id": "frame#30" }],
+      "criterion_hints": ["demo", "technical_execution"]
+    },
+    {
+      "kind": "claim",
+      "description": "The presenter says a live demo recorded a sentence and the extracted task appeared in the web app.",
+      "sources": [{ "type": "transcript", "id": "tr#3" }, { "type": "frame", "id": "frame#35" }],
+      "criterion_hints": ["demo"]
+    },
+    {
+      "kind": "claim",
+      "description": "The presenter names concrete next steps: calendar integration and a beta with three pilot teams.",
+      "sources": [{ "type": "transcript", "id": "tr#4" }],
+      "criterion_hints": ["feasibility"]
+    },
+    {
+      "kind": "observation",
+      "description": "A slide titled 'Architecture' with a three-box diagram is visible.",
+      "sources": [{ "type": "frame", "id": "frame#40" }],
+      "criterion_hints": ["technical_execution", "pitch_clarity"]
+    }
+  ],
+  "injection_suspected": false
+}
