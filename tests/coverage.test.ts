@@ -4,7 +4,7 @@ import { normalizedTotal } from '../src/core/scoring.js';
 import { estimateUsd } from '../src/core/usage.js';
 import { validateEvidenceOutput, validateTranscriptOutput } from '../src/core/reference-validation.js';
 import { callWithAttempts } from '../src/core/retry.js';
-import { CliError } from '../src/core/errors.js';
+import { CliError, ProviderError } from '../src/core/errors.js';
 import { selectJudgeFrames } from '../src/core/frame-selection.js';
 
 describe('extra branch coverage', () => {
@@ -61,20 +61,93 @@ describe('extra branch coverage', () => {
       expect(codes).toContain('INVALID_REFERENCE');
     }
   });
-  it('retry: deadline exceeded before attempt -> DEADLINE_EXCEEDED', async () => {
-    await expect(
-      callWithAttempts(
-        {
-          operation: 'judge', sampleIndex: 0, maxAttempts: 3,
-          sleep: async () => {}, now: () => 10_000, deadlineMs: 5_000,
-          saveRaw: async () => 'x', stage: 'judge',
-        },
-        async () => {
-          throw new Error('should not be called');
-        },
-        () => ({ ok: true, value: 1 }),
-      ),
-    ).rejects.toMatchObject({ code: 'DEADLINE_EXCEEDED', exitCode: 3 });
+  it('D01: deadline equality prevents the first provider call', async () => {
+    let calls = 0;
+    const error = await callWithAttempts(
+      {
+        operation: 'judge', sampleIndex: 0, maxAttempts: 3,
+        sleep: async () => {}, now: () => 5_000, deadlineMs: 5_000,
+        saveRaw: async () => 'x', stage: 'judge',
+      },
+      async () => {
+        calls += 1;
+        return { output: {}, rawText: '{}', usage: null, latencyMs: 0, modelVersion: null, responseId: null, effectiveSettings: {} };
+      },
+      () => ({ ok: true, value: 1 }),
+    ).catch((err: unknown) => err);
+    expect(error).toMatchObject({ code: 'DEADLINE_EXCEEDED', exitCode: 3, attempts: [] });
+    expect(calls).toBe(0);
+  });
+
+  it('D02: retry backoff crossing deadline preserves the retryable attempt', async () => {
+    let now = 0;
+    let calls = 0;
+    const saved: unknown[] = [];
+    const error = await callWithAttempts(
+      {
+        operation: 'judge', sampleIndex: 0, maxAttempts: 3,
+        sleep: async (ms) => { now += ms; },
+        now: () => now,
+        deadlineMs: 100,
+        saveRaw: async (body) => { saved.push(body); return 'attempts/0.json'; },
+        stage: 'judge',
+      },
+      async () => {
+        calls += 1;
+        throw new ProviderError('rate_limited', 'slow', { retryAfterMs: 200 });
+      },
+      () => ({ ok: true, value: 1 }),
+    ).catch((err: unknown) => err);
+    expect(error).toMatchObject({
+      code: 'DEADLINE_EXCEEDED',
+      attempts: [{ status: 'retryable_error' }],
+    });
+    expect((error as { attempts: unknown[] }).attempts).toHaveLength(1);
+    expect(saved).toHaveLength(1);
+    expect(calls).toBe(1);
+  });
+
+  it('D03: validation failure crossing deadline preserves usage and raw output', async () => {
+    let now = 0;
+    let calls = 0;
+    const saved: Array<{ usage: unknown }> = [];
+    const usage = {
+      input_tokens: 10, output_tokens: 20, thinking_tokens: 30,
+      total_tokens: 60, input_modality_tokens: null,
+    };
+    const error = await callWithAttempts(
+      {
+        operation: 'judge', sampleIndex: 0, maxAttempts: 3,
+        sleep: async () => {},
+        now: () => now,
+        deadlineMs: 100,
+        saveRaw: async (body) => { saved.push({ usage: body.usage }); return 'attempts/0.json'; },
+        stage: 'judge',
+      },
+      async () => {
+        calls += 1;
+        return {
+          output: { invalid: true },
+          rawText: '{"invalid":true}',
+          usage,
+          latencyMs: 1,
+          modelVersion: 'fixture',
+          responseId: null,
+          effectiveSettings: {},
+        };
+      },
+      () => {
+        now = 100;
+        return { ok: false, errors: [{ code: 'SCHEMA', message: 'invalid' }] };
+      },
+    ).catch((err: unknown) => err);
+    expect(error).toMatchObject({
+      code: 'DEADLINE_EXCEEDED',
+      attempts: [{ status: 'validation_failed', usage, raw_output_path: 'attempts/0.json' }],
+    });
+    expect((error as { attempts: unknown[] }).attempts).toHaveLength(1);
+    expect(saved).toEqual([{ usage }]);
+    expect(calls).toBe(1);
   });
   it('retry: non-ProviderError thrown -> fatal, one attempt', async () => {
     let calls = 0;

@@ -154,7 +154,11 @@ export function aggregateScores(
   // §41: extractor flag ORs into the scorecard alongside judge samples.
   const injectionSuspected =
     samples.some((s) => s.injection_suspected) || opts?.extraInjectionSuspected === true;
-  if (injectionSuspected) reviewFlags.add('injection_suspected');
+  if (injectionSuspected) {
+    reviewFlags.add('injection_suspected');
+    reviewFlags.add('needs_review');
+  }
+  if (reviewFlags.has('frame_reference_overflow')) reviewFlags.add('needs_review');
 
   const uncertainties = [...new Set(samples.flatMap((s) => s.uncertainties))];
 

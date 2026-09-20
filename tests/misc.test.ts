@@ -12,7 +12,13 @@ import {
   isAbsentOrEmptyDir,
 } from '../src/core/storage.js';
 import { newId, newRunId, newFrameId } from '../src/core/ids.js';
-import { estimateUsd, buildUsageReport, loadPricing, type PricingTable } from '../src/core/usage.js';
+import {
+  estimateUsd,
+  buildUsageReport,
+  loadPricing,
+  USAGE_CALCULATION_VERSION,
+  type PricingTable,
+} from '../src/core/usage.js';
 import { validateConfig } from '../src/core/schemas/config.js';
 import { validateRubric } from '../src/core/schemas/rubric.js';
 import { FixtureTranscriber, FixtureExtractor, FixtureJudge } from '../src/providers/fixture/index.js';
@@ -54,14 +60,14 @@ describe('ids', () => {
 describe('usage accounting', () => {
   const table: PricingTable = {
     currency: 'USD',
-    models: { m: { valid_until: 'x', input_per_1m_tokens: 1, output_per_1m_tokens: 2, output_includes_thinking: true } },
+    models: { m: { valid_until: 'x', input_per_1m_tokens: 1, output_per_1m_tokens: 2 } },
   };
   it('estimateUsd: known usage -> decimal cost', () => {
     const c = estimateUsd(
       { input_tokens: 1_000_000, output_tokens: 500_000, thinking_tokens: 10, total_tokens: null, input_modality_tokens: null },
       table.models['m'],
     );
-    expect(c!.toString()).toBe('2');
+    expect(c!.toString()).toBe('2.00002');
   });
   it('estimateUsd: null token count -> null', () => {
     expect(
@@ -91,6 +97,81 @@ describe('usage accounting', () => {
     expect(p.table.models['gemini-3.8-flash']).toBeTruthy();
     expect(p.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it('C01 estimates candidates plus thinking tokens', () => {
+    expect(
+      estimateUsd(
+        { input_tokens: 1000, output_tokens: 1000, thinking_tokens: 9000, total_tokens: null, input_modality_tokens: null },
+        { valid_until: 'x', input_per_1m_tokens: 0.75, output_per_1m_tokens: 3.75 },
+      )!.toString(),
+    ).toBe('0.03825');
+  });
+
+  it('C02 treats thinking=0 as known', () => {
+    expect(
+      estimateUsd(
+        { input_tokens: 1000, output_tokens: 1000, thinking_tokens: 0, total_tokens: null, input_modality_tokens: null },
+        { valid_until: 'x', input_per_1m_tokens: 0.75, output_per_1m_tokens: 3.75 },
+      )!.toString(),
+    ).toBe('0.0045');
+  });
+
+  it.each([
+    ['C03 thinking', { input_tokens: 1000, output_tokens: 1000, thinking_tokens: null }],
+    ['C04 input', { input_tokens: null, output_tokens: 1000, thinking_tokens: 0 }],
+    ['C05 output', { input_tokens: 1000, output_tokens: null, thinking_tokens: 0 }],
+  ])('%s returns null for any unknown token dimension', (_name, usage) => {
+    expect(
+      estimateUsd(
+        { ...usage, total_tokens: null, input_modality_tokens: null },
+        { valid_until: 'x', input_per_1m_tokens: 0.75, output_per_1m_tokens: 3.75 },
+      ),
+    ).toBeNull();
+  });
+
+  it('C06 reports known cost separately from unknown attempts', () => {
+    const attempts: AttemptRecord[] = [
+      {
+        attempt_index: 0, operation: 'judge', sample_index: 0,
+        started_at: new Date(0).toISOString(), latency_ms: 1, status: 'ok',
+        error: null, validation_errors: [], raw_output_path: 'a', usage: {
+          input_tokens: 1000, output_tokens: 1000, thinking_tokens: 0,
+          total_tokens: null, input_modality_tokens: null,
+        },
+      },
+      {
+        attempt_index: 1, operation: 'judge', sample_index: 0,
+        started_at: new Date(0).toISOString(), latency_ms: 1, status: 'validation_failed',
+        error: null, validation_errors: ['bad'], raw_output_path: 'b', usage: {
+          input_tokens: 1000, output_tokens: 1000, thinking_tokens: null,
+          total_tokens: null, input_modality_tokens: null,
+        },
+      },
+      {
+        attempt_index: 2, operation: 'judge', sample_index: 0,
+        started_at: new Date(0).toISOString(), latency_ms: 1, status: 'fatal_error',
+        error: { code: 'PROVIDER_OTHER', message: 'failed' }, validation_errors: [],
+        raw_output_path: 'c', usage: null,
+      },
+    ];
+    const report = buildUsageReport(
+      {
+        mode: 'live',
+        pricing: { path: 'pricing.json', sha256: 'x', valid_until: 'x' },
+        attempts,
+        model: 'm',
+      },
+      {
+        currency: 'USD',
+        models: { m: { valid_until: 'x', input_per_1m_tokens: 0.75, output_per_1m_tokens: 3.75 } },
+      },
+    ) as { calculation_version: string; attempts: unknown[]; totals: { estimated_usd: string | null; known_estimated_usd: string; unknown_attempts: number } };
+    expect(report.calculation_version).toBe(USAGE_CALCULATION_VERSION);
+    expect(report.attempts).toHaveLength(3);
+    expect(report.totals.estimated_usd).toBeNull();
+    expect(report.totals.known_estimated_usd).toBe('0.0045');
+    expect(report.totals.unknown_attempts).toBe(2);
+  });
 });
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- test mutators operate on deep clones */
@@ -99,7 +180,7 @@ describe('config schema (§41.2)', () => {
     schema_version: 1,
     id: 'cfg',
     output_language: 'ja',
-    transcriber: { provider: 'google', model: 'm', prompt_version: 'transcribe-v1', temperature: 0 },
+    transcriber: { provider: 'google', model: 'm', prompt_version: 'transcribe-v2', temperature: 0 },
     evidence_extractor: { provider: 'google', model: 'm', prompt_version: 'evidence-v1' },
     judges: [{ id: 'g', provider: 'google', model: 'm', prompt_version: 'absolute-score-v1' }],
     samples_per_judge: 3,

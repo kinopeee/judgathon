@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@10.34.5",
   "bin": {
-    "judgathon": "dist/cli/index.js"
+    "judgathon": "scripts/judgathon.mjs"
   },
   "engines": {
     "node": ">=22"

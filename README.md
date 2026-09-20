@@ -14,6 +14,9 @@ pnpm build
 ```
 
 Requires `ffmpeg` and `ffprobe` on PATH.
+The `judgathon` launcher requires the build output; without it, it prints
+`BUILD_REQUIRED: dist/cli/index.js not found. Run \`pnpm build\` first.` and exits
+with code 2.
 
 ## Commands
 
@@ -23,7 +26,7 @@ node scripts/make-sample-video.mjs samples/team_alpha.mp4   # synthetic 60 s sam
 pnpm exec judgathon run \
   --video ./samples/team_alpha.mp4 \
   --rubric ./rubrics/hackathon-2026-v3.yaml \
-  --config ./configs/judge-google-v1.yaml \
+  --config ./configs/judge-google-v2.yaml \
   --output-language ja \
   --provider-mode fixture \
   --out ./out/team_alpha
@@ -43,6 +46,18 @@ pnpm exec judgathon repeat \
 `repeat` re-runs only the judge stage (3 samples) five times against the frozen
 transcript / evidence-set / selected frames of a completed run, then writes
 `repeat-report.json` (per-criterion mean and population σ, pass when σ ≤ 0.5).
+Runs are frozen with `frozen_inputs.hash_version: 2`; older runs are rejected
+with `UNSUPPORTED_FROZEN_INPUT_VERSION` and must be run again with the current
+CLI. The v2 frozen input includes transcript, evidence-set, config and rubric
+snapshot hashes, ordered selected-frame records, all prompt hashes, the judge
+schema hash, normalized extra review flags, and the composite `input_hash`.
+
+`usage.json` includes `calculation_version:
+gemini-output-plus-thinking-v2`. Estimated cost is
+`input_tokens * input_rate / 1e6 + (output_tokens + thinking_tokens) *
+output_rate / 1e6`; if any required token count is unknown, the estimated cost
+is `null`. Transcript `asr_confidence` is always persisted as `null` in the
+v2 pipeline because this pipeline has no measured ASR confidence.
 
 ## Fixture vs live
 

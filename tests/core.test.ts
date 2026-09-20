@@ -13,6 +13,7 @@ import { dedupeCandidates, capCandidates, selectJudgeFrames } from '../src/core/
 import { phashFromGray32, hammingDistance } from '../src/media/phash.js';
 import { computeRepeatStats, buildRepeatReport } from '../src/core/repeat-report.js';
 import { selectAuditSample } from '../src/core/evidence-audit.js';
+import { computeInputHash, normalizeReviewFlags } from '../src/core/input-hash.js';
 import { TEST_RUBRIC, scoreOutput } from './helpers.js';
 import type { ProviderCallResult } from '../src/providers/types.js';
 
@@ -179,6 +180,34 @@ describe('aggregation (§13)', () => {
     );
     expect(res.injection_suspected).toBe(true);
     expect(res.review_flags).toContain('injection_suspected');
+    expect(res.review_flags).toContain('needs_review');
+  });
+  it('V02 adds needs_review when one judge sample suspects injection', () => {
+    const suspected = scoreOutput([4, 4]);
+    suspected.injection_suspected = true;
+    const res = aggregateScores(TEST_RUBRIC, [
+      scoreOutput([4, 4]),
+      suspected,
+      scoreOutput([4, 4]),
+    ]);
+    expect(res.review_flags).toEqual(expect.arrayContaining(['injection_suspected', 'needs_review']));
+  });
+  it('V03 promotes frame reference overflow to needs_review', () => {
+    const res = aggregateScores(
+      TEST_RUBRIC,
+      [scoreOutput([4, 4]), scoreOutput([4, 4]), scoreOutput([4, 4])],
+      { extraReviewFlags: ['frame_reference_overflow'] },
+    );
+    expect(res.review_flags).toEqual(
+      expect.arrayContaining(['frame_reference_overflow', 'needs_review']),
+    );
+  });
+  it('V04 does not promote stable scores without review causes', () => {
+    const res = aggregateScores(
+      TEST_RUBRIC,
+      [scoreOutput([4, 4]), scoreOutput([4, 4]), scoreOutput([4, 4])],
+    );
+    expect(res.review_flags).not.toContain('needs_review');
   });
   it('unstable via 3 distinct valid values [1,2,3]', () => {
     const res = aggregateScores(TEST_RUBRIC, [
@@ -199,6 +228,24 @@ describe('aggregation (§13)', () => {
 
 describe('transcript validation', () => {
   const dur = 60_000;
+  it('A01 rejects numeric and string confidence values', () => {
+    for (const confidence of [0.9, '0.9']) {
+      const res = validateTranscriptOutput(
+        { language: 'en', segments: [{ start_ms: 0, end_ms: 1000, text: 'hi', confidence }] },
+        dur,
+      );
+      expect(res.ok).toBe(false);
+    }
+  });
+  it('A02 accepts null and omitted confidence', () => {
+    for (const segment of [
+      { start_ms: 0, end_ms: 1000, text: 'hi', confidence: null },
+      { start_ms: 0, end_ms: 1000, text: 'hi' },
+    ]) {
+      const res = validateTranscriptOutput({ language: 'en', segments: [segment] }, dur);
+      expect(res.ok).toBe(true);
+    }
+  });
   it('P0-19 missing confidence -> accepted, stays null', () => {
     const res = validateTranscriptOutput(
       { language: 'en', segments: [{ start_ms: 0, end_ms: 1000, text: 'hi', confidence: null }] },
@@ -454,5 +501,47 @@ describe('evidence audit (§41.6)', () => {
     const b = selectAuditSample(ids);
     expect(a).toEqual(b);
     expect(a.length).toBe(30);
+  });
+});
+
+describe('frozen input hash v2', () => {
+  const base = {
+    hash_version: 2 as const,
+    transcript_sha256: 'a'.repeat(64),
+    evidence_set_sha256: 'b'.repeat(64),
+    config_snapshot_sha256: 'c'.repeat(64),
+    rubric_snapshot_sha256: 'd'.repeat(64),
+    selected_frames: [{ frame_id: 'f1', timestamp_ms: 1, sha256: 'e'.repeat(64) }],
+    prompt_hashes: {
+      transcriber: '1'.repeat(64),
+      evidence_extractor: '2'.repeat(64),
+      judge: '3'.repeat(64),
+    },
+    judge_schema_sha256: '4'.repeat(64),
+    review_flags_extra: ['z', 'a', 'z'],
+  };
+
+  it('is sensitive to selected frame order', () => {
+    const swapped = {
+      ...base,
+      selected_frames: [
+        { frame_id: 'f2', timestamp_ms: 2, sha256: 'f'.repeat(64) },
+        ...base.selected_frames,
+      ],
+    };
+    expect(computeInputHash(base)).not.toBe(computeInputHash(swapped));
+  });
+
+  it('deduplicates and sorts review flags', () => {
+    expect(normalizeReviewFlags(['z', 'a', 'z'])).toEqual(['a', 'z']);
+    expect(computeInputHash(base)).toBe(
+      computeInputHash({ ...base, review_flags_extra: ['a', 'z'] }),
+    );
+  });
+
+  it('does not include input_hash in the digest', () => {
+    expect(computeInputHash(base)).toBe(
+      computeInputHash({ ...base, input_hash: 'f'.repeat(64) } as typeof base),
+    );
   });
 });
