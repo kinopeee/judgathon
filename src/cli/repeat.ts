@@ -385,16 +385,48 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
       const idx = String(i + 1).padStart(2, '0');
       const childDir = path.join(opts.outDir, 'runs', idx);
       const childRunId = newRunId();
-      await fs.mkdir(childDir, { recursive: true });
-      const childManifest: Record<string, unknown> = {
-        schema_version: 1,
-        run_id: childRunId,
-        source_run_id: manifest['run_id'],
-        status: 'running',
-        stage: 'judge',
-        created_at: new Date().toISOString(),
+      let childManifest: Record<string, unknown>;
+      try {
+        await fs.mkdir(childDir, { recursive: true });
+        childManifest = {
+          schema_version: 1,
+          run_id: childRunId,
+          source_run_id: manifest['run_id'],
+          status: 'running',
+          stage: 'judge',
+          created_at: new Date().toISOString(),
+        };
+        await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
+      } catch (err) {
+        // If the child dir itself is unwritable every later artifact save
+        // fails too, so abort immediately with a normalized error.
+        throw err instanceof CliError
+          ? err
+          : Object.assign(
+              new CliError(
+                'INTERNAL_ERROR',
+                err instanceof Error ? err.message : String(err),
+                3,
+                'judge',
+              ),
+              { cause: err },
+            );
+      }
+      // Best-effort: a failed-manifest save must not mask the primary error
+      // (the on-disk manifest may stay 'running'; the report records 'failed').
+      const writeFailedManifest = async (cliErr: CliError): Promise<void> => {
+        childManifest['status'] = 'failed';
+        childManifest['error'] = { code: cliErr.code, message: cliErr.message };
+        try {
+          await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
+        } catch (saveErr) {
+          log(
+            `[repeat] failed to write failed manifest for run ${idx}: ${
+              saveErr instanceof Error ? saveErr.message : String(saveErr)
+            }`,
+          );
+        }
       };
-      await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
       try {
         log(`[judge] child run ${idx}/5`);
         const res = await runJudgeStage({
@@ -469,14 +501,10 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
             : new CliError('PROVIDER_OTHER', String(err), 3, 'judge');
         // Auth failure: abort immediately (no point continuing).
         if (cliErr.code === 'PROVIDER_AUTH') {
-          childManifest['status'] = 'failed';
-          childManifest['error'] = { code: cliErr.code, message: cliErr.message };
-          await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
+          await writeFailedManifest(cliErr);
           throw cliErr;
         }
-        childManifest['status'] = 'failed';
-        childManifest['error'] = { code: cliErr.code, message: cliErr.message };
-        await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
+        await writeFailedManifest(cliErr);
         perRunLevels.push(null);
         runs.push({ index: i + 1, path: `runs/${idx}`, status: 'failed', run_id: childRunId });
       }

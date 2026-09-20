@@ -7,15 +7,15 @@ import {
   validateTranscriptOutput,
   validateEvidenceOutput,
 } from '../src/core/reference-validation.js';
-import { callWithAttempts } from '../src/core/retry.js';
-import { ProviderError } from '../src/core/errors.js';
+import { callWithAttempts, type AttemptRecord } from '../src/core/retry.js';
+import { CliError, ProviderError } from '../src/core/errors.js';
 import { dedupeCandidates, capCandidates, selectJudgeFrames } from '../src/core/frame-selection.js';
 import { phashFromGray32, hammingDistance } from '../src/media/phash.js';
 import { computeRepeatStats, buildRepeatReport } from '../src/core/repeat-report.js';
 import { selectAuditSample } from '../src/core/evidence-audit.js';
 import { computeInputHash, normalizeReviewFlags } from '../src/core/input-hash.js';
 import { TEST_RUBRIC, scoreOutput } from './helpers.js';
-import type { ProviderCallResult } from '../src/providers/types.js';
+import type { ProviderCallResult, Usage } from '../src/providers/types.js';
 
 const CTX = {
   rubric: TEST_RUBRIC,
@@ -410,6 +410,137 @@ describe('retry (§41.5)', () => {
       ),
     ).rejects.toBeTruthy();
     expect(sleep.mock.calls[0]![0]).toBe(30_000);
+  });
+
+  const capture = async (promise: Promise<unknown>): Promise<unknown> =>
+    promise.then(
+      () => {
+        throw new Error('expected rejection');
+      },
+      (e: unknown) => e,
+    );
+  const USAGE: Usage = {
+    input_tokens: 10,
+    output_tokens: 5,
+    thinking_tokens: 2,
+    total_tokens: 17,
+    input_modality_tokens: null,
+  };
+
+  it('IO-S1 saveRaw failure on a successful response -> INTERNAL_ERROR, usage kept in attempts', async () => {
+    // Given a provider that returns a successful response with usage, and a
+    // saveRaw that always fails
+    const injected = new Error('attempt save failed');
+    const saveRaw = vi.fn(async () => {
+      throw injected;
+    });
+    let calls = 0;
+    // When callWithAttempts runs
+    const err = await capture(
+      callWithAttempts(
+        { ...baseCtx, sleep: vi.fn(async () => {}), saveRaw },
+        async () => {
+          calls += 1;
+          return { ...okResult({ good: true }), usage: USAGE };
+        },
+        () => ({ ok: true, value: 'ok' }),
+      ),
+    );
+    // Then the rejection is an INTERNAL_ERROR CliError carrying the attempts;
+    // the billed attempt keeps status 'ok' and its usage
+    expect(err).toBeInstanceOf(CliError);
+    const cliErr = err as CliError;
+    expect(cliErr.code).toBe('INTERNAL_ERROR');
+    expect(cliErr.exitCode).toBe(3);
+    expect(cliErr.stage).toBe('judge');
+    expect(cliErr.message).toBe('attempt save failed');
+    expect(cliErr.cause).toBe(injected);
+    expect(calls).toBe(1);
+    const attempts = (cliErr as unknown as { attempts: AttemptRecord[] }).attempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.status).toBe('ok');
+    expect(attempts[0]!.usage).toEqual(USAGE);
+    expect(attempts[0]!.raw_output_path).toBeNull();
+  });
+
+  it('IO-S2 saveRaw failure on the error record -> INTERNAL_ERROR, provider error kept, no provider retry', async () => {
+    // Given a provider that fails with a retryable error and saveRaw that fails
+    const injected = new Error('attempt save failed');
+    const saveRaw = vi.fn(async () => {
+      throw injected;
+    });
+    let calls = 0;
+    // When callWithAttempts runs
+    const err = await capture(
+      callWithAttempts(
+        { ...baseCtx, sleep: vi.fn(async () => {}), saveRaw },
+        async () => {
+          calls += 1;
+          throw new ProviderError('rate_limited', 'slow');
+        },
+        () => ({ ok: true, value: 1 }),
+      ),
+    );
+    // Then INTERNAL_ERROR propagates with the provider attempt recorded, and
+    // the provider call is not retried (save failure aborts immediately)
+    expect(err).toBeInstanceOf(CliError);
+    const cliErr = err as CliError;
+    expect(cliErr.code).toBe('INTERNAL_ERROR');
+    expect(cliErr.exitCode).toBe(3);
+    expect(cliErr.cause).toBe(injected);
+    expect(calls).toBe(1);
+    const attempts = (cliErr as unknown as { attempts: AttemptRecord[] }).attempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.status).toBe('retryable_error');
+    expect(attempts[0]!.error?.code).toBe('PROVIDER_RATE_LIMITED');
+    expect(attempts[0]!.usage).toBeNull();
+  });
+
+  it('IO-S3 persistent saveRaw failure -> INTERNAL_ERROR, saveRaw called once (no save retry)', async () => {
+    // Given saveRaw that fails on every invocation
+    const saveRaw = vi.fn(async (): Promise<string> => {
+      throw new Error('attempt save failed');
+    });
+    // When callWithAttempts runs with a healthy provider
+    const err = await capture(
+      callWithAttempts(
+        { ...baseCtx, sleep: vi.fn(async () => {}), saveRaw },
+        async () => okResult({ good: true }),
+        () => ({ ok: true, value: 1 }),
+      ),
+    );
+    // Then the first save failure aborts immediately without retrying the save
+    expect(err).toBeInstanceOf(CliError);
+    expect((err as CliError).code).toBe('INTERNAL_ERROR');
+    expect(saveRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('IO-S4 saveRaw failure on a validation_failed response -> INTERNAL_ERROR, record kept', async () => {
+    // Given a provider whose output fails schema validation, and saveRaw fails
+    const injected = new Error('attempt save failed');
+    const saveRaw = vi.fn(async () => {
+      throw injected;
+    });
+    // When callWithAttempts runs
+    const err = await capture(
+      callWithAttempts(
+        { ...baseCtx, sleep: vi.fn(async () => {}), saveRaw },
+        async () => ({ ...okResult({ bad: true }), usage: USAGE }),
+        () => ({ ok: false, errors: [{ code: 'SCHEMA_VIOLATION', message: 'bad shape' }] }),
+      ),
+    );
+    // Then INTERNAL_ERROR propagates and the attempt keeps status, error code,
+    // and usage for usage aggregation
+    expect(err).toBeInstanceOf(CliError);
+    const cliErr = err as CliError;
+    expect(cliErr.code).toBe('INTERNAL_ERROR');
+    expect(cliErr.exitCode).toBe(3);
+    expect(cliErr.cause).toBe(injected);
+    const attempts = (cliErr as unknown as { attempts: AttemptRecord[] }).attempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.status).toBe('validation_failed');
+    expect(attempts[0]!.error?.code).toBe('PROVIDER_OUTPUT_INVALID');
+    expect(attempts[0]!.usage).toEqual(USAGE);
   });
 });
 
