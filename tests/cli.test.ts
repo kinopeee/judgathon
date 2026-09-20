@@ -3,8 +3,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tmpDir, sampleVideo } from './helpers.js';
-import { FixtureJudge } from '../src/providers/fixture/index.js';
-import type { ScoreInput } from '../src/providers/types.js';
+import { FixtureJudge, FixtureTranscriber } from '../src/providers/fixture/index.js';
+import type { ScoreInput, Usage } from '../src/providers/types.js';
 import { cmdRepeat } from '../src/cli/repeat.js';
 import { cmdRun } from '../src/cli/run.js';
 import * as storage from '../src/core/storage.js';
@@ -22,6 +22,14 @@ function runCli(args: string[], env?: NodeJS.ProcessEnv) {
     timeout: 180_000,
   });
 }
+
+const rejection = async (promise: Promise<unknown>): Promise<unknown> =>
+  promise.then(
+    () => {
+      throw new Error('expected rejection');
+    },
+    (e: unknown) => e,
+  );
 
 let built = false;
 beforeAll(() => {
@@ -574,6 +582,158 @@ describe('frozen inputs v2', () => {
     },
   );
 
+  it.each([1, 3, 5])(
+    'IO-P7 child run %s completed+failed manifest writes both fail -> failed once, measurement continues',
+    async (failingIndex) => {
+      // Given a completed-manifest write failure for child run N, AND the
+      // failed-manifest write also failing (secondary failure)
+      const idx = String(failingIndex).padStart(2, '0');
+      const out = path.join(tmpDir('judgathon-io-p7-'), 'repeat');
+      const writeJsonAtomic = storage.writeJsonAtomic;
+      const spy = vi.spyOn(storage, 'writeJsonAtomic').mockImplementation(async (filePath, value) => {
+        const status = (value as { status?: string }).status;
+        if (
+          filePath.endsWith(path.join('runs', idx, 'manifest.json')) &&
+          (status === 'completed' || status === 'failed')
+        ) {
+          throw new Error(`manifest write failed (${status})`);
+        }
+        await writeJsonAtomic(filePath, value);
+      });
+      // When cmdRepeat runs
+      try {
+        const repeat = await cmdRepeat({
+          fromDir: sourceDir,
+          times: 5,
+          providerMode: 'fixture',
+          fixtureDir: path.join(ROOT, 'fixtures/default'),
+          outDir: out,
+          pricingPath: path.join(ROOT, 'configs/pricing.json'),
+          // And the diagnostic logger itself throws: even that must not mask
+          // the primary failure.
+          log: (line) => {
+            if (line.includes('failed to write failed manifest')) {
+              throw new Error('log failed');
+            }
+          },
+        });
+        // Then the secondary failure does not mask the primary error: the run
+        // is recorded failed exactly once and the remaining runs still execute
+        expect(repeat.status).toBe('not_evaluated');
+      } finally {
+        spy.mockRestore();
+      }
+      const report = JSON.parse(await fs.readFile(path.join(out, 'repeat-report.json'), 'utf8')) as {
+        runs: Array<{ index: number; status: string }>;
+        criteria: Array<{ values: Array<string | null>; missing_count: number }>;
+      };
+      expect(report.runs).toHaveLength(5);
+      expect(report.runs[failingIndex - 1]!.status).toBe('failed');
+      for (const criterion of report.criteria) {
+        expect(criterion.values).toHaveLength(5);
+        expect(criterion.missing_count).toBe(1);
+        expect(criterion.values[failingIndex - 1]).toBeNull();
+      }
+      // All 5 runs completed their 3 judge samples: usage holds 15 attempts.
+      const usage = JSON.parse(await fs.readFile(path.join(out, 'usage.json'), 'utf8')) as {
+        attempts: Array<{ operation: string }>;
+      };
+      expect(usage.attempts).toHaveLength(15);
+    },
+  );
+
+  it('IO-P8 auth failure + failed-manifest write failure keeps PROVIDER_AUTH as the primary error', async () => {
+    // Given run 02's first judge call fails with auth, AND the failed-manifest
+    // write also fails (secondary failure)
+    const dir = tmpDir('judgathon-io-p8-');
+    const out = path.join(dir, 'repeat');
+    const originalScore = FixtureJudge.prototype.score;
+    let scoreCalls = 0;
+    const scoreSpy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      scoreCalls += 1;
+      if (scoreCalls === 4) {
+        throw new ProviderError('auth', 'denied', { httpStatus: 401 });
+      }
+      return originalScore.call(this, input);
+    });
+    const writeJsonAtomic = storage.writeJsonAtomic;
+    const writeSpy = vi.spyOn(storage, 'writeJsonAtomic').mockImplementation(async (filePath, value) => {
+      if (
+        filePath.endsWith(path.join('runs', '02', 'manifest.json')) &&
+        (value as { status?: string }).status === 'failed'
+      ) {
+        throw new Error('failed-manifest write failed');
+      }
+      await writeJsonAtomic(filePath, value);
+    });
+    // When cmdRepeat runs
+    try {
+      // Then the primary auth error propagates, not masked by the save failure
+      await expect(
+        cmdRepeat({
+          fromDir: sourceDir,
+          times: 5,
+          providerMode: 'fixture',
+          fixtureDir: path.join(ROOT, 'fixtures/default'),
+          outDir: out,
+          pricingPath: path.join(ROOT, 'configs/pricing.json'),
+          log: () => {},
+        }),
+      ).rejects.toMatchObject({ code: 'PROVIDER_AUTH', exitCode: 3 });
+    } finally {
+      scoreSpy.mockRestore();
+      writeSpy.mockRestore();
+    }
+    const usage = JSON.parse(await fs.readFile(path.join(out, 'usage.json'), 'utf8')) as {
+      attempts: unknown[];
+    };
+    expect(usage.attempts).toHaveLength(4);
+    expect(await fs.stat(path.join(out, 'runs', '03')).then(() => true).catch(() => false)).toBe(false);
+  });
+
+  it('IO-P9 initial running-manifest write failure -> INTERNAL_ERROR at judge, aborts before runs/02', async () => {
+    // Given the child run 01 initial (status 'running') manifest write fails
+    const out = path.join(tmpDir('judgathon-io-p9-'), 'repeat');
+    const injected = new Error('initial manifest write failed');
+    const writeJsonAtomic = storage.writeJsonAtomic;
+    const spy = vi.spyOn(storage, 'writeJsonAtomic').mockImplementation(async (filePath, value) => {
+      if (
+        filePath.endsWith(path.join('runs', '01', 'manifest.json')) &&
+        (value as { status?: string }).status === 'running'
+      ) {
+        throw injected;
+      }
+      await writeJsonAtomic(filePath, value);
+    });
+    // When cmdRepeat runs
+    try {
+      // Then the raw fs failure is normalized to INTERNAL_ERROR at stage judge
+      const err = await rejection(
+        cmdRepeat({
+          fromDir: sourceDir,
+          times: 5,
+          providerMode: 'fixture',
+          fixtureDir: path.join(ROOT, 'fixtures/default'),
+          outDir: out,
+          pricingPath: path.join(ROOT, 'configs/pricing.json'),
+          log: () => {},
+        }),
+      );
+      expect(err).toBeInstanceOf(CliError);
+      const cliErr = err as CliError;
+      expect(cliErr.code).toBe('INTERNAL_ERROR');
+      expect(cliErr.exitCode).toBe(3);
+      expect(cliErr.stage).toBe('judge');
+      expect(cliErr.cause).toBe(injected);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await fs.stat(path.join(out, 'runs', '02')).then(() => true).catch(() => false)).toBe(false);
+  });
+
   it.each([
     ['H01 rubric max_score', 'rubric.snapshot.json', (value: Record<string, unknown>) => {
       const rubric = value.rubric as { criteria: Array<{ max_score: number }> };
@@ -758,14 +918,6 @@ describe('run save-failure regression', () => {
     log: () => {},
   });
 
-  const rejection = async (promise: Promise<unknown>): Promise<unknown> =>
-    promise.then(
-      () => {
-        throw new Error('expected rejection');
-      },
-      (e: unknown) => e,
-    );
-
   it('IO-R1 usage write failure normalizes to INTERNAL_ERROR and records a failed manifest', async () => {
     const out = path.join(tmpDir('judgathon-io-r1-'), 'run');
     const injected = new Error('usage write failed');
@@ -865,6 +1017,57 @@ describe('run save-failure regression', () => {
       spy.mockRestore();
     }
     expect(manifestWrites).toBe(2);
+  }, 240_000);
+
+  it('IO-R6 transcript attempt save failure -> INTERNAL_ERROR, failed manifest at transcript, usage keeps the billed attempt', async () => {
+    // Given a transcript response carrying usage, but saving
+    // attempts/transcript-a0.json fails
+    const out = path.join(tmpDir('judgathon-io-r6-'), 'run');
+    const usage: Usage = {
+      input_tokens: 100,
+      output_tokens: 40,
+      thinking_tokens: 10,
+      total_tokens: 150,
+      input_modality_tokens: null,
+    };
+    const originalTranscribe = FixtureTranscriber.prototype.transcribe;
+    const tSpy = vi.spyOn(FixtureTranscriber.prototype, 'transcribe').mockImplementation(async function (
+      this: FixtureTranscriber,
+      input,
+    ) {
+      const res = await originalTranscribe.call(this, input);
+      return { ...res, usage };
+    });
+    const injected = new Error('attempt save failed');
+    const writeJsonAtomic = storage.writeJsonAtomic;
+    const wSpy = vi.spyOn(storage, 'writeJsonAtomic').mockImplementation(async (filePath, value) => {
+      if (filePath.endsWith(path.join('attempts', 'transcript-a0.json'))) throw injected;
+      await writeJsonAtomic(filePath, value);
+    });
+    // When cmdRun runs
+    try {
+      const err = await rejection(cmdRun(runOpts(out)));
+      // Then INTERNAL_ERROR carries the save's stage, and the billed attempt is
+      // still persisted to usage.json (status 'ok', usage kept)
+      expect(err).toBeInstanceOf(CliError);
+      const cliErr = err as CliError;
+      expect(cliErr.code).toBe('INTERNAL_ERROR');
+      expect(cliErr.exitCode).toBe(3);
+      expect(cliErr.cause).toBe(injected);
+    } finally {
+      tSpy.mockRestore();
+      wSpy.mockRestore();
+    }
+    const manifest = JSON.parse(await fs.readFile(path.join(out, 'manifest.json'), 'utf8'));
+    expect(manifest.status).toBe('failed');
+    expect(manifest.stage).toBe('transcript');
+    const usageDoc = JSON.parse(await fs.readFile(path.join(out, 'usage.json'), 'utf8')) as {
+      attempts: Array<{ operation: string; status: string; usage: unknown }>;
+    };
+    expect(usageDoc.attempts).toHaveLength(1);
+    expect(usageDoc.attempts[0]!.operation).toBe('transcript');
+    expect(usageDoc.attempts[0]!.status).toBe('ok');
+    expect(usageDoc.attempts[0]!.usage).toEqual(usage);
   }, 240_000);
 
   it('IO-R5 judge-run write failure records a failed manifest and keeps all attempts in usage', async () => {

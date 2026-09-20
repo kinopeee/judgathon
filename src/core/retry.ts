@@ -69,6 +69,25 @@ export async function callWithAttempts<T>(
   const attempts: AttemptRecord[] = [];
   let repairFeedback: string | undefined;
 
+  // Raw-output persistence is not a provider call: a save failure is an
+  // internal error, fails immediately (no retry — resending risks double
+  // billing), and keeps the attempt record already pushed for usage.json.
+  const saveAttempt = async (body: RawAttemptBody): Promise<string> => {
+    try {
+      return await ctx.saveRaw(body);
+    } catch (err) {
+      throw Object.assign(
+        new CliError(
+          'INTERNAL_ERROR',
+          err instanceof Error ? err.message : String(err),
+          3,
+          ctx.stage,
+        ),
+        { cause: err, attempts },
+      );
+    }
+  };
+
   for (let attempt = 0; attempt < ctx.maxAttempts; attempt++) {
     if (ctx.deadlineMs !== undefined && ctx.now() >= ctx.deadlineMs) {
       throw Object.assign(
@@ -90,7 +109,20 @@ export async function callWithAttempts<T>(
       const latency = ctx.now() - started;
       const validation = validate(result.output);
       if (validation.ok) {
-        const rawPath = await ctx.saveRaw({
+        record = {
+          attempt_index: attempt,
+          operation: ctx.operation,
+          sample_index: ctx.sampleIndex,
+          started_at: startedAt,
+          latency_ms: latency,
+          status: 'ok',
+          error: null,
+          validation_errors: [],
+          raw_output_path: null,
+          usage: result.usage,
+        };
+        attempts.push(record);
+        record.raw_output_path = await saveAttempt({
           operation: ctx.operation,
           sample_index: ctx.sampleIndex,
           attempt_index: attempt,
@@ -103,23 +135,23 @@ export async function callWithAttempts<T>(
           model_version: result.modelVersion,
           response_id: result.responseId,
         });
-        record = {
-          attempt_index: attempt,
-          operation: ctx.operation,
-          sample_index: ctx.sampleIndex,
-          started_at: startedAt,
-          latency_ms: latency,
-          status: 'ok',
-          error: null,
-          validation_errors: [],
-          raw_output_path: rawPath,
-          usage: result.usage,
-        };
-        attempts.push(record);
         return { value: validation.value, result, attempts };
       }
       const msgs = validation.errors.map((e) => `${e.code}: ${e.message}`);
-      const rawPath = await ctx.saveRaw({
+      record = {
+        attempt_index: attempt,
+        operation: ctx.operation,
+        sample_index: ctx.sampleIndex,
+        started_at: startedAt,
+        latency_ms: latency,
+        status: 'validation_failed',
+        error: { code: 'PROVIDER_OUTPUT_INVALID', message: msgs.join('; ') },
+        validation_errors: msgs,
+        raw_output_path: null,
+        usage: result.usage,
+      };
+      attempts.push(record);
+      record.raw_output_path = await saveAttempt({
         operation: ctx.operation,
         sample_index: ctx.sampleIndex,
         attempt_index: attempt,
@@ -132,27 +164,32 @@ export async function callWithAttempts<T>(
         model_version: result.modelVersion,
         response_id: result.responseId,
       });
+      repairFeedback = `Your previous output failed validation: ${msgs.join('; ')}; return corrected JSON`;
+    } catch (err) {
+      // CliError from call/validate, or INTERNAL_ERROR from saveAttempt:
+      // propagate as-is instead of misclassifying it as a provider failure.
+      if (err instanceof CliError) throw Object.assign(err, { attempts });
+      const latency = ctx.now() - started;
+      const isTimeout = err instanceof ProviderError && err.kind === 'timeout';
+      const code =
+        err instanceof ProviderError ? `PROVIDER_${err.kind.toUpperCase()}` : 'PROVIDER_OTHER';
+      const message = err instanceof Error ? err.message : String(err);
+      const retryable = err instanceof ProviderError && isRetryableProviderError(err);
       record = {
         attempt_index: attempt,
         operation: ctx.operation,
         sample_index: ctx.sampleIndex,
         started_at: startedAt,
         latency_ms: latency,
-        status: 'validation_failed',
-        error: { code: 'PROVIDER_OUTPUT_INVALID', message: msgs.join('; ') },
-        validation_errors: msgs,
-        raw_output_path: rawPath,
-        usage: result.usage,
+        status: retryable ? 'retryable_error' : 'fatal_error',
+        error: { code, message },
+        validation_errors: [],
+        raw_output_path: null,
+        usage: null,
       };
+      if (isTimeout) record.possible_double_billing = true;
       attempts.push(record);
-      repairFeedback = `Your previous output failed validation: ${msgs.join('; ')}; return corrected JSON`;
-    } catch (err) {
-      const latency = ctx.now() - started;
-      const isTimeout = err instanceof ProviderError && err.kind === 'timeout';
-      const code =
-        err instanceof ProviderError ? `PROVIDER_${err.kind.toUpperCase()}` : 'PROVIDER_OTHER';
-      const message = err instanceof Error ? err.message : String(err);
-      const rawPath = await ctx.saveRaw({
+      record.raw_output_path = await saveAttempt({
         operation: ctx.operation,
         sample_index: ctx.sampleIndex,
         attempt_index: attempt,
@@ -164,21 +201,6 @@ export async function callWithAttempts<T>(
         model_version: null,
         response_id: null,
       });
-      const retryable = err instanceof ProviderError && isRetryableProviderError(err);
-      record = {
-        attempt_index: attempt,
-        operation: ctx.operation,
-        sample_index: ctx.sampleIndex,
-        started_at: startedAt,
-        latency_ms: latency,
-        status: retryable ? 'retryable_error' : 'fatal_error',
-        error: { code, message },
-        validation_errors: [],
-        raw_output_path: rawPath,
-        usage: null,
-      };
-      if (isTimeout) record.possible_double_billing = true;
-      attempts.push(record);
       if (!retryable) {
         throw Object.assign(
           new CliError(code, message, 3, ctx.stage),

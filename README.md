@@ -79,7 +79,7 @@ schemas, a 120 s per-attempt timeout, and the Files API for audio upload.
 |---|---|
 | 0 | artifacts generated / repeat pass |
 | 2 | input / config / schema-invalid (INVALID_MEDIA, CONFIG_INVALID, CONFIG_LANGUAGE_CONFLICT, OUTPUT_DIR_NOT_EMPTY, PROVIDER_MODE_MISMATCH, INPUT_HASH_MISMATCH, INVALID_LANGUAGE, INVALID_ARGS) |
-| 3 | external dependency / provider / media-processing failure (FFMPEG_NOT_FOUND, MISSING_CREDENTIALS, PROVIDER_*, DEADLINE_EXCEEDED) |
+| 3 | external dependency / provider / media-processing / internal failure (FFMPEG_NOT_FOUND, MISSING_CREDENTIALS, PROVIDER_*, DEADLINE_EXCEEDED, INTERNAL_ERROR) |
 | 4 | repeat quality evaluation failed (σ > 0.5) |
 | 5 | insufficient data to evaluate (NO_TRANSCRIPT, repeat not_evaluated) |
 
