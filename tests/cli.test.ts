@@ -568,6 +568,9 @@ describe('frozen inputs v2', () => {
         await fs.readFile(path.join(out, 'runs', idx, 'manifest.json'), 'utf8'),
       );
       expect(childManifest.status).toBe('failed');
+      expect(childManifest.stage).toBe('judge');
+      expect(childManifest.error.code).toBe('INTERNAL_ERROR');
+      expect(childManifest.error.message).toBe('child manifest write failed');
     },
   );
 
