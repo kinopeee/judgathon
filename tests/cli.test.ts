@@ -423,6 +423,88 @@ describe('frozen inputs v2', () => {
     scoreSpy.mockRestore();
   });
 
+  it('M01 name_masking run records judge_input_mask, artifacts stay verbatim, repeat recomputes the same map', async () => {
+    const calls: ScoreInput[] = [];
+    const originalScore = FixtureJudge.prototype.score;
+    const scoreSpy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      calls.push(input);
+      return originalScore.call(this, input);
+    });
+    const runDir = path.join(tmpDir('judgathon-masked-run-'), 'run');
+    await cmdRun({
+      video: sampleVideo(),
+      rubricPath: path.join(ROOT, 'rubrics/hackathon-2026-v3.yaml'),
+      configPath: path.join(ROOT, 'configs/judge-google-v5.yaml'),
+      outDir: runDir,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      videoSource: 'screen',
+      promptsDir: path.join(ROOT, 'prompts'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    const runCalls = calls.splice(0, calls.length);
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(runDir, 'manifest.json'), 'utf8'),
+    ) as { status: string; judge_input_mask?: { enabled: boolean; replacements: Record<string, string> } };
+    expect(manifest.status).toBe('completed');
+    expect(manifest.judge_input_mask!.enabled).toBe(true);
+    expect(manifest.judge_input_mask!.replacements['Team Alpha']).toBe('Team A');
+
+    // Persisted artifacts stay verbatim.
+    const transcript = JSON.parse(
+      await fs.readFile(path.join(runDir, 'transcript.json'), 'utf8'),
+    ) as { segments: Array<{ text: string }> };
+    expect(transcript.segments.some((s) => s.text.includes('Team Alpha'))).toBe(true);
+    expect(await fs.stat(path.join(runDir, 'scorecard.json'))).toBeTruthy();
+
+    // The judge saw only masked segments.
+    expect(runCalls).toHaveLength(3);
+    for (const call of runCalls) {
+      for (const seg of call.transcriptSegments) {
+        expect(seg.text).not.toContain('Team Alpha');
+      }
+      expect(call.transcriptSegments[0]!.text).toContain('Team A');
+    }
+
+    const repeatDir = path.join(tmpDir('judgathon-masked-repeat-'), 'repeat');
+    await cmdRepeat({
+      fromDir: runDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: repeatDir,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    expect(calls).toHaveLength(15);
+    for (let i = 1; i <= 5; i++) {
+      const childManifest = JSON.parse(
+        await fs.readFile(
+          path.join(repeatDir, 'runs', String(i).padStart(2, '0'), 'manifest.json'),
+          'utf8'),
+      ) as { judge_input_mask?: unknown };
+      expect(childManifest.judge_input_mask).toEqual(manifest.judge_input_mask);
+    }
+    for (let i = 0; i < calls.length; i++) {
+      const expected = runCalls[i % 3]!;
+      const actual = calls[i]!;
+      expect(actual.transcriptSegments).toEqual(expected.transcriptSegments);
+      expect(actual.evidenceSet).toEqual(expected.evidenceSet);
+    }
+    scoreSpy.mockRestore();
+  }, 240_000);
+
+  it('M02 run without name_masking records no judge_input_mask', async () => {
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(sourceDir, 'manifest.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(manifest['judge_input_mask']).toBeUndefined();
+  });
+
   it('F02 rejects evidence missing description before provider calls', async () => {
     const dir = tmpDir('judgathon-frozen-invalid-');
     const copy = path.join(dir, 'run');

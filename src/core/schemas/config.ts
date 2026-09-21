@@ -32,6 +32,7 @@ const providerEntryAny = providerOptions.extend({
 
 export const judgeEntrySchema = providerEntryAny.extend({
   id: nonBlank('id'),
+  name_masking: z.boolean().optional(),
 });
 
 export const configSchema = z

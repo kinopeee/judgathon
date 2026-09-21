@@ -21,7 +21,7 @@ import type { ProviderSet } from '../providers/types.js';
 import type { TranscriptSegment } from '../providers/types.js';
 import { FixtureJudge } from '../providers/fixture/index.js';
 import { GoogleJudge } from '../providers/google/index.js';
-import { runJudgeStage, buildEvidenceForPrompt, fillPrompt, loadPrompt } from './run.js';
+import { runJudgeStage, buildEvidenceForPrompt, fillPrompt, loadPrompt, maskJudgeInputs } from './run.js';
 import type { AttemptRecord } from '../core/retry.js';
 
 export interface RepeatOptions {
@@ -436,6 +436,16 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
     if (unshown.length > 0) unshownSourceIds[item.id] = unshown;
   }
   const evidenceForPrompt = buildEvidenceForPrompt(evidenceItems, unshownSourceIds);
+  // Recompute the same deterministic mask the run applied (§41.6).
+  let judgeSegments = segments;
+  let judgeEvidence = evidenceForPrompt;
+  let maskRecord: { enabled: true; replacements: Record<string, string> } | undefined;
+  if (judgeEntry.name_masking === true) {
+    const masked = maskJudgeInputs(segments, evidenceForPrompt);
+    judgeSegments = masked.segments;
+    judgeEvidence = masked.evidence;
+    maskRecord = masked.record;
+  }
 
   const runs: Array<{ index: number; path: string; status: string; run_id: string | null }> = [];
   const perRunLevels: Array<Map<string, string | null> | null> = [];
@@ -489,6 +499,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           status: 'running',
           stage: 'judge',
           created_at: new Date().toISOString(),
+          ...(maskRecord !== undefined ? { judge_input_mask: maskRecord } : {}),
         };
         await writeJsonAtomic(path.join(childDir, 'manifest.json'), childManifest);
       } catch (err) {
@@ -533,8 +544,8 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           judgeEntry,
           prompt: judgePrompt,
           rubric,
-          evidenceForPrompt,
-          transcriptSegments: segments,
+          evidenceForPrompt: judgeEvidence,
+          transcriptSegments: judgeSegments,
           selectedFrames: selectedMeta.map((f) => ({
             frame_id: f.frame_id,
             timestamp_ms: f.timestamp_ms,

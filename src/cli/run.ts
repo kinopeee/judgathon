@@ -52,6 +52,7 @@ import {
   writeTextAtomic,
 } from '../core/storage.js';
 import { aggregateScores } from '../core/aggregation.js';
+import { applyNameMask, buildNameMaskMap } from '../core/name-masking.js';
 import { buildUsageReport, loadPricing, type PricingTable } from '../core/usage.js';
 import { selectAuditSample } from '../core/evidence-audit.js';
 import { validateMediaFile } from '../media/media-validation.js';
@@ -376,6 +377,39 @@ export function buildEvidenceForPrompt(
       ...e,
       unshown_source_ids: unshownSourceIds[e.id] ?? [],
     })),
+  };
+}
+
+/**
+ * Judge-input masking (§41.6): mask `チーム<Name>` / `Team <Name>` in the
+ * transcript segments and evidence descriptions sent to the judge. The map
+ * is built in transcript order, then evidence order, so it is deterministic
+ * and `repeat` recomputes the same table from the frozen artifacts.
+ */
+export function maskJudgeInputs(
+  segments: TranscriptSegment[],
+  evidenceForPrompt: { evidence: Array<Record<string, unknown>> },
+): {
+  segments: TranscriptSegment[];
+  evidence: { evidence: Array<Record<string, unknown>> };
+  record: { enabled: true; replacements: Record<string, string> };
+} {
+  const map = buildNameMaskMap([
+    ...segments.map((s) => s.text),
+    ...evidenceForPrompt.evidence
+      .map((e) => e['description'])
+      .filter((d): d is string => typeof d === 'string'),
+  ]);
+  return {
+    segments: segments.map((s) => ({ ...s, text: applyNameMask(s.text, map) })),
+    evidence: {
+      evidence: evidenceForPrompt.evidence.map((e) =>
+        typeof e['description'] === 'string'
+          ? { ...e, description: applyNameMask(e['description'], map) }
+          : e,
+      ),
+    },
+    record: { enabled: true, replacements: Object.fromEntries(map) },
   };
 }
 
@@ -813,11 +847,19 @@ export async function cmdRun(opts: RunOptions): Promise<{
     const inputHash = computeInputHash(frozenInputsWithoutHash);
     const frozenInputs = frozenInputsV2Schema.parse({ ...frozenInputsWithoutHash, input_hash: inputHash });
     manifest['frozen_inputs'] = frozenInputs;
+    const evidenceForPrompt = buildEvidenceForPrompt(evidenceItems, selection.unshown_source_ids);
+    let judgeSegments = segments;
+    let judgeEvidence = evidenceForPrompt;
+    if (config.judges[0]!.name_masking === true) {
+      const masked = maskJudgeInputs(segments, evidenceForPrompt);
+      judgeSegments = masked.segments;
+      judgeEvidence = masked.evidence;
+      manifest['judge_input_mask'] = masked.record;
+    }
     await writeJsonAtomic(manifestPath, manifest);
 
     // Stage: judge
     log('[judge] scoring (3 samples)');
-    const evidenceForPrompt = buildEvidenceForPrompt(evidenceItems, selection.unshown_source_ids);
 
     const judgeRunId = newJudgeRunId();
     const judgeRes = await runJudgeStage({
@@ -826,8 +868,8 @@ export async function cmdRun(opts: RunOptions): Promise<{
       judgeEntry: config.judges[0]!,
       prompt: prompts.judge,
       rubric,
-      evidenceForPrompt,
-      transcriptSegments: segments,
+      evidenceForPrompt: judgeEvidence,
+      transcriptSegments: judgeSegments,
       selectedFrames: selectedFrames.map((f) => ({
         frame_id: f.frame_id,
         timestamp_ms: f.timestamp_ms,

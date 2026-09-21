@@ -20,6 +20,7 @@ import {
   type PricingTable,
 } from '../src/core/usage.js';
 import { validateConfig } from '../src/core/schemas/config.js';
+import { storedConfigSnapshotSchema } from '../src/core/schemas/artifacts.js';
 import { validateRubric } from '../src/core/schemas/rubric.js';
 import { FixtureTranscriber, FixtureExtractor, FixtureJudge } from '../src/providers/fixture/index.js';
 import { extractAudio, extractFrames } from '../src/media/ffmpeg.js';
@@ -206,11 +207,39 @@ describe('config schema (§41.2)', () => {
     ['frame_selection 12', (c: any) => (c.frame_selection.max_extraction_frames = 12)],
     ['thinking minimal', (c: any) => (c.judges[0].thinking = 'minimal')],
     ['unknown key', (c: any) => (c.extra = 1)],
+    ['unknown judges key', (c: any) => (c.judges[0].foo = 1)],
     ['temperature 3', (c: any) => (c.transcriber.temperature = 3)],
   ])('rejects %s', (_name, mut) => {
     const c = JSON.parse(JSON.stringify(good));
     mut(c);
     expect(validateConfig(c).ok).toBe(false);
+  });
+  it('accepts judges[0].name_masking', () => {
+    const c = JSON.parse(JSON.stringify(good));
+    c.judges[0].name_masking = true;
+    const r = validateConfig(c);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.config.judges[0]!.name_masking).toBe(true);
+  });
+  it('storedConfigSnapshotSchema parses an effective config without name_masking (old snapshot)', () => {
+    const sha = 'a'.repeat(64);
+    const prompt = { path: 'prompts/judge/absolute-score-v1.md', version: 'absolute-score-v1', sha256: sha };
+    const snapshot = {
+      schema_version: 1,
+      config_id: 'cfg',
+      config_sha256: sha,
+      effective: {
+        ...JSON.parse(JSON.stringify(good)),
+        provider_mode: 'fixture',
+        prompts: {
+          transcriber: { ...prompt, path: 'prompts/transcriber/transcribe-v2.md', version: 'transcribe-v2' },
+          evidence_extractor: { ...prompt, path: 'prompts/evidence_extractor/evidence-v1.md', version: 'evidence-v1' },
+          judge: prompt,
+        },
+      },
+    };
+    expect(snapshot.effective.judges[0].name_masking).toBeUndefined();
+    expect(storedConfigSnapshotSchema.safeParse(snapshot).success).toBe(true);
   });
 });
 
