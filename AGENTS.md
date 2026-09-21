@@ -84,7 +84,7 @@ pnpm test:coverage  # vitest run --coverage（CI と同一）
 node scripts/make-sample-video.mjs samples/team_alpha.mp4
 pnpm exec judgathon run --video ./samples/team_alpha.mp4 \
   --rubric ./rubrics/hackathon-2026-v3.yaml \
-  --config ./configs/judge-google-v3.yaml \
+  --config ./configs/judge-google-v4.yaml \
   --output-language ja --provider-mode fixture --out ./out/team_alpha
 pnpm exec judgathon repeat --from ./out/team_alpha --times 5 \
   --provider-mode fixture --out ./out/team_alpha_repeat
