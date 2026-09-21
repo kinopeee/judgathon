@@ -140,6 +140,8 @@ export function validateScoreOutput(
     evidenceIds: ReadonlySet<string>;
     transcriptIds: ReadonlySet<string>;
     selectedFrameIds: ReadonlySet<string>;
+    /** evidence id -> kind, for the strong-requires-observation rule */
+    evidenceKinds: ReadonlyMap<string, ValidatedEvidence['kind']>;
   },
 ): ValidationResult<RawScoreOutput> {
   const res = rawScoreOutputSchema.safeParse(raw);
@@ -229,6 +231,15 @@ export function validateScoreOutput(
         errors.push({
           code: 'INVALID_EVIDENCE_STATE',
           message: `criterion '${c.criterion_id}': non-null level requires >=1 distinct evidence_ids`,
+        });
+      }
+      if (
+        c.evidence_strength === 'strong' &&
+        ![...dedup].some((id) => ctx.evidenceKinds.get(id) === 'observation')
+      ) {
+        errors.push({
+          code: 'INVALID_EVIDENCE_STATE',
+          message: `criterion '${c.criterion_id}': evidence_strength 'strong' requires at least one cited ev_* with kind 'observation'`,
         });
       }
     }

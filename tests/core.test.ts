@@ -22,6 +22,9 @@ const CTX = {
   evidenceIds: new Set(['ev_x']),
   transcriptIds: new Set(['tr_0']),
   selectedFrameIds: new Set(['frame_sel']),
+  evidenceKinds: new Map<string, 'claim' | 'observation' | 'limitation' | 'uncertainty'>([
+    ['ev_x', 'observation'],
+  ]),
 };
 
 describe('scoring (§12.2)', () => {
@@ -109,6 +112,45 @@ describe('score output validation (§41.5)', () => {
     const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), CTX);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
+  });
+  it('strong with an observation ev_* cited -> ok', () => {
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(scoreOutput([4, 4]))), CTX);
+    expect(res.ok).toBe(true);
+  });
+  it('strong citing only claim ev_* -> INVALID_EVIDENCE_STATE', () => {
+    const out = scoreOutput([4, 4]);
+    out.criteria[0]!.evidence_ids = ['ev_claim'];
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), {
+      ...CTX,
+      evidenceIds: new Set(['ev_x', 'ev_claim']),
+      evidenceKinds: new Map([
+        ['ev_x', 'observation' as const],
+        ['ev_claim', 'claim' as const],
+      ]),
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
+  });
+  it('strong citing only tr_*/frame_* (no ev_*) -> INVALID_EVIDENCE_STATE', () => {
+    const out = scoreOutput([4, 4]);
+    out.criteria[0]!.evidence_ids = ['tr_0', 'frame_sel'];
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), CTX);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
+  });
+  it('partial citing only claim ev_* -> ok (rule applies to strong only)', () => {
+    const out = scoreOutput([4, 4]);
+    out.criteria[0]!.evidence_strength = 'partial';
+    out.criteria[0]!.evidence_ids = ['ev_claim'];
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), {
+      ...CTX,
+      evidenceIds: new Set(['ev_x', 'ev_claim']),
+      evidenceKinds: new Map([
+        ['ev_x', 'observation' as const],
+        ['ev_claim', 'claim' as const],
+      ]),
+    });
+    expect(res.ok).toBe(true);
   });
   it('boundary: undefined/null/empty-string required fields are rejected', () => {
     for (const mut of [

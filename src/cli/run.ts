@@ -240,11 +240,12 @@ export async function runJudgeStage(opts: {
   rubric: Rubric;
   evidenceForPrompt: unknown;
   transcriptSegments: TranscriptSegment[];
-  selectedFrames: Array<{ frame_id: string; timestamp_ms: number; path: string }>;
+  selectedFrames: Array<{ frame_id: string; timestamp_ms: number; path: string; source: string }>;
   validationCtx: {
     evidenceIds: Set<string>;
     transcriptIds: Set<string>;
     selectedFrameIds: Set<string>;
+    evidenceKinds: Map<string, 'claim' | 'observation' | 'limitation' | 'uncertainty'>;
   };
   reviewFlagsExtra: string[];
   /** Extractor-side injection flag — OR-ed into the scorecard (§41). */
@@ -292,6 +293,7 @@ export async function runJudgeStage(opts: {
             frameId: f.frame_id,
             timestampMs: f.timestamp_ms,
             path: f.path,
+            source: f.source,
           })),
           sampleIndex,
           schema: rawScoreJsonSchema,
@@ -303,6 +305,7 @@ export async function runJudgeStage(opts: {
           evidenceIds: opts.validationCtx.evidenceIds,
           transcriptIds: opts.validationCtx.transcriptIds,
           selectedFrameIds: opts.validationCtx.selectedFrameIds,
+          evidenceKinds: opts.validationCtx.evidenceKinds,
         }),
     );
     } catch (err) {
@@ -656,6 +659,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
             frameId: f.frame_id,
             timestampMs: f.timestamp_ms,
             path: path.join(outDir, frames.find((x) => x.frame_id === f.frame_id)!.path),
+            source: f.source,
           })),
           rubricCriteria: rubric.criteria.map((c) => ({
             id: c.id,
@@ -827,11 +831,13 @@ export async function cmdRun(opts: RunOptions): Promise<{
         frame_id: f.frame_id,
         timestamp_ms: f.timestamp_ms,
         path: path.join(outDir, f.path),
+        source: f.source,
       })),
       validationCtx: {
         evidenceIds: new Set(evidenceIds),
         transcriptIds: new Set(transcriptIds),
         selectedFrameIds: new Set(selection.selected_frame_ids),
+        evidenceKinds: new Map(evidenceItems.map((e) => [e.id, e.kind])),
       },
       reviewFlagsExtra,
       extraInjectionSuspected: evidenceSetJson.injection_suspected,

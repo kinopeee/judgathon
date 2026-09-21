@@ -28,6 +28,8 @@ export interface FrameRef {
   frameId: string;
   timestampMs: number;
   path: string;
+  /** capture source label shown to the model, e.g. 'screen' | 'camera' (§22.4) */
+  source: string;
 }
 
 export interface TranscribeInput {

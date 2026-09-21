@@ -181,6 +181,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
     path: string;
     sha256: string;
     timestamp_ms: number;
+    source: string;
   }>;
   const metaById = new Map<string, (typeof framesMeta)[number]>();
   for (const frame of framesMeta) {
@@ -445,11 +446,13 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
             frame_id: f.frame_id,
             timestamp_ms: f.timestamp_ms,
             path: path.join(opts.fromDir, f.path),
+            source: f.source,
           })),
           validationCtx: {
             evidenceIds: new Set(evidenceIds),
             transcriptIds: new Set(segments.map((s) => s.id)),
             selectedFrameIds: selectedSet,
+            evidenceKinds: new Map(evidenceItems.map((e) => [e.id, e.kind])),
           },
           reviewFlagsExtra: normalizeReviewFlags(frozenInputs.review_flags_extra),
           extraInjectionSuspected: evidenceSet.injection_suspected === true,

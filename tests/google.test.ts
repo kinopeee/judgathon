@@ -156,7 +156,7 @@ describe('google adapter (mocked SDK)', () => {
     await expect(
       ex.extract({
         promptText: '', transcriptSegments: [], rubricCriteria: [],
-        frames: [{ frameId: 'f1', timestampMs: 0, path: big }],
+        frames: [{ frameId: 'f1', timestampMs: 0, path: big, source: 'screen' }],
         schema: {},
       }),
     ).rejects.toMatchObject({ kind: 'invalid_input' });

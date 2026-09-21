@@ -254,7 +254,7 @@ async function frameParts(frames: ScoreInput['frames']): Promise<Part[]> {
         `PAYLOAD_TOO_LARGE: inline frame bytes exceed ${INLINE_BYTE_LIMIT}`,
       );
     }
-    parts.push({ text: `frame_id=${f.frameId} t_ms=${f.timestampMs}` });
+    parts.push({ text: `frame_id=${f.frameId} t_ms=${f.timestampMs} source=${f.source}` });
     parts.push({ inlineData: { data: data.toString('base64'), mimeType: 'image/jpeg' } });
   }
   return parts;
