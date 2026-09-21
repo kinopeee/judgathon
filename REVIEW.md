@@ -57,6 +57,11 @@ behavioral changes, check them against the spec, not just the diff.
 - `scripts/make-sample-video.mjs` is a dev tool for generating synthetic
   test media — production-hardening suggestions are out of scope.
 
+## Out-of-scope findings
+
+- If a finding concerns something outside the PR's scope, say so in the
+  comment and resolve the conversation instead of requesting changes.
+
 ## Performance / Robustness
 
 - Flag work that would break the atomic-write contract or leave partial
