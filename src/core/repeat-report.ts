@@ -40,6 +40,10 @@ export function computeRepeatStats(values: Array<string | null>): {
 export function buildRepeatReport(opts: {
   sourceRunId: string;
   inputHash: string;
+  /** Frozen input hash of the source run — set for --output-language compare mode. */
+  sourceInputHash?: string;
+  /** Frozen -> requested judge output_language — set for compare mode. */
+  outputLanguageCompare?: { from: string; to: string };
   mode: 'fixture' | 'live';
   runs: Array<{ index: number; path: string; status: string; run_id: string | null }>;
   criterionIds: string[];
@@ -66,6 +70,10 @@ export function buildRepeatReport(opts: {
     schema_version: 1,
     source_run_id: opts.sourceRunId,
     input_hash: opts.inputHash,
+    ...(opts.sourceInputHash !== undefined ? { source_input_hash: opts.sourceInputHash } : {}),
+    ...(opts.outputLanguageCompare !== undefined
+      ? { output_language_compare: opts.outputLanguageCompare }
+      : {}),
     mode: opts.mode,
     runs: opts.runs,
     criteria,

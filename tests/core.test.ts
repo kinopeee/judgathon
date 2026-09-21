@@ -671,6 +671,34 @@ describe('repeat evaluation (§41.6)', () => {
     expect(report['status']).toBe('not_evaluated');
     expect(report['note']).toContain('fixture');
   });
+  it('report: compare mode adds source_input_hash and output_language_compare additively', () => {
+    const perRunLevels = Array.from({ length: 5 }, () => new Map([['a', '3']]));
+    const compare = buildRepeatReport({
+      sourceRunId: 'run_x',
+      inputHash: 'derived',
+      sourceInputHash: 'frozen',
+      outputLanguageCompare: { from: 'ja', to: 'en' },
+      mode: 'fixture',
+      runs: [],
+      criterionIds: ['a'],
+      perRunLevels,
+    });
+    expect(compare['schema_version']).toBe(1);
+    expect(compare['input_hash']).toBe('derived');
+    expect(compare['source_input_hash']).toBe('frozen');
+    expect(compare['output_language_compare']).toEqual({ from: 'ja', to: 'en' });
+
+    const normal = buildRepeatReport({
+      sourceRunId: 'run_x',
+      inputHash: 'h',
+      mode: 'fixture',
+      runs: [],
+      criterionIds: ['a'],
+      perRunLevels,
+    });
+    expect(normal).not.toHaveProperty('source_input_hash');
+    expect(normal).not.toHaveProperty('output_language_compare');
+  });
 });
 
 describe('evidence audit (§41.6)', () => {

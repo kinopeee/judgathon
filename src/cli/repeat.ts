@@ -4,7 +4,7 @@ import { CliError } from '../core/errors.js';
 import { newJudgeRunId, newRunId } from '../core/ids.js';
 import { buildRepeatReport } from '../core/repeat-report.js';
 import { computeInputHash, judgeSchemaSha256, normalizeReviewFlags } from '../core/input-hash.js';
-import { sha256File, writeJsonAtomic, readJsonFile, isAbsentOrEmptyDir } from '../core/storage.js';
+import { sha256File, sha256Hex, writeJsonAtomic, readJsonFile, isAbsentOrEmptyDir } from '../core/storage.js';
 import { buildUsageReport, loadPricing } from '../core/usage.js';
 import type { JudgeConfig } from '../core/schemas/config.js';
 import { validateConfig } from '../core/schemas/config.js';
@@ -21,7 +21,7 @@ import type { ProviderSet } from '../providers/types.js';
 import type { TranscriptSegment } from '../providers/types.js';
 import { FixtureJudge } from '../providers/fixture/index.js';
 import { GoogleJudge } from '../providers/google/index.js';
-import { runJudgeStage, buildEvidenceForPrompt } from './run.js';
+import { runJudgeStage, buildEvidenceForPrompt, fillPrompt, loadPrompt } from './run.js';
 import type { AttemptRecord } from '../core/retry.js';
 
 export interface RepeatOptions {
@@ -30,6 +30,8 @@ export interface RepeatOptions {
   providerMode: 'fixture' | 'live';
   outDir: string;
   fixtureDir: string;
+  promptsDir: string;
+  outputLanguage?: string;
   pricingPath: string;
   log?: (line: string) => void;
 }
@@ -264,7 +266,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
 
   const judgePromptRel = configSnap.effective.prompts.judge;
   const judgePromptText = await fs.readFile(resolveInside(opts.fromDir, judgePromptRel.path), 'utf8');
-  const judgePrompt = {
+  let judgePrompt = {
     version: judgeEntry.prompt_version,
     path: judgePromptRel.path,
     sha256: judgePromptRel.sha256,
@@ -275,7 +277,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
   if (currentJudgeSchemaSha256 !== frozenInputs.judge_schema_sha256) {
     hashMismatch('judge schema');
   }
-  const inputHash = computeInputHash({
+  const inputHashParts = {
     hash_version: frozenInputs.hash_version,
     transcript_sha256: transcriptSha256,
     evidence_set_sha256: evidenceSetSha256,
@@ -289,8 +291,64 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
     prompt_hashes: frozenInputs.prompt_hashes,
     judge_schema_sha256: currentJudgeSchemaSha256,
     review_flags_extra: frozenInputs.review_flags_extra,
-  });
-  if (inputHash !== frozenInputs.input_hash) hashMismatch('composite input_hash');
+  };
+  if (computeInputHash(inputHashParts) !== frozenInputs.input_hash) {
+    hashMismatch('composite input_hash');
+  }
+
+  // §41.6 language comparison: --output-language re-fills only the judge
+  // prompt's output_language on top of the verified frozen inputs. Every
+  // other hashed field stays frozen; input_hash is re-derived with the new
+  // judge prompt hash.
+  let inputHash = frozenInputs.input_hash;
+  let outputLanguageCompare: { from: string; to: string } | undefined;
+  if (opts.outputLanguage !== undefined) {
+    let targetLanguage: string;
+    try {
+      targetLanguage = Intl.getCanonicalLocales(opts.outputLanguage)[0]!;
+    } catch {
+      throw new CliError(
+        'INVALID_LANGUAGE',
+        `--output-language '${opts.outputLanguage}' is not a valid BCP 47 tag`,
+        2,
+        'validate_input',
+      );
+    }
+    let frozenLanguage: string;
+    try {
+      frozenLanguage = Intl.getCanonicalLocales(configSnap.effective.output_language)[0]!;
+    } catch {
+      throw new CliError(
+        'INPUT_INVALID',
+        `frozen output_language '${configSnap.effective.output_language}' is not a valid BCP 47 tag`,
+        2,
+        'validate_input',
+      );
+    }
+    // The template must regenerate the frozen judge prompt byte-for-byte
+    // under the frozen language; otherwise it is not the prompt the frozen
+    // inputs were built from.
+    const template = await loadPrompt(opts.promptsDir, judgeEntry.prompt_version);
+    if (sha256Hex(fillPrompt(template.text, { output_language: frozenLanguage })) !== frozenInputs.prompt_hashes.judge) {
+      throw new CliError(
+        'INPUT_INVALID',
+        `judge prompt '${judgeEntry.prompt_version}' under --prompts-dir does not reproduce the frozen judge prompt`,
+        2,
+        'validate_input',
+      );
+    }
+    if (targetLanguage !== frozenLanguage) {
+      const text = fillPrompt(template.text, { output_language: targetLanguage });
+      const judgeSha256 = sha256Hex(text);
+      judgePrompt = { version: template.version, path: template.path, sha256: judgeSha256, text };
+      inputHash = computeInputHash({
+        ...inputHashParts,
+        prompt_hashes: { ...inputHashParts.prompt_hashes, judge: judgeSha256 },
+      });
+      outputLanguageCompare = { from: frozenLanguage, to: targetLanguage };
+      log(`[repeat] output_language compare: ${frozenLanguage} -> ${targetLanguage}`);
+    }
+  }
 
   // Providers (incl. credential check) before creating the output dir.
   const evidenceIds = evidenceSet.evidence_ids;
@@ -518,6 +576,9 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
     const report = buildRepeatReport({
       sourceRunId: String(manifest['run_id'] ?? ''),
       inputHash,
+      ...(outputLanguageCompare !== undefined
+        ? { sourceInputHash: frozenInputs.input_hash, outputLanguageCompare }
+        : {}),
       mode: opts.providerMode,
       runs,
       criterionIds,

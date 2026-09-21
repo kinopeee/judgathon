@@ -26,7 +26,7 @@ node scripts/make-sample-video.mjs samples/team_alpha.mp4   # synthetic 60 s sam
 pnpm exec judgathon run \
   --video ./samples/team_alpha.mp4 \
   --rubric ./rubrics/hackathon-2026-v3.yaml \
-  --config ./configs/judge-google-v2.yaml \
+  --config ./configs/judge-google-v3.yaml \
   --output-language ja \
   --provider-mode fixture \
   --out ./out/team_alpha
@@ -51,6 +51,33 @@ with `UNSUPPORTED_FROZEN_INPUT_VERSION` and must be run again with the current
 CLI. The v2 frozen input includes transcript, evidence-set, config and rubric
 snapshot hashes, ordered selected-frame records, all prompt hashes, the judge
 schema hash, normalized extra review flags, and the composite `input_hash`.
+
+`repeat` flags: `--fixture-dir` (fixture mode only, default
+`fixtures/default`), `--prompts-dir` (default `prompts`), `--pricing`
+(default `configs/pricing.json`), `--provider-mode fixture|live`
+(required, must match the source run), and `--output-language <bcp47>`
+(language-compare mode).
+
+With `--output-language <tag>`, `repeat` runs the §41.6 language-difference
+measurement: every frozen input — transcript, evidence-set, selected
+frames, config and rubric snapshots — stays identical (all frozen hash
+checks still run), and only the judge prompt's `output_language` is
+re-filled. The judge prompt template must exist under `--prompts-dir` and
+reproduce the frozen judge prompt byte-for-byte under the frozen language;
+a missing template is `CONFIG_INVALID`, a mismatching one `INPUT_INVALID`,
+and a non-BCP-47 tag `INVALID_LANGUAGE`. The report then records the
+derived `input_hash` actually judged plus `source_input_hash` (the frozen
+hash) and `output_language_compare: {from, to}`; each child
+`judge-run.json` records the substituted prompt's sha256. This is an
+evaluation-only mode: the §4.4 rule that fixes `output_language` within an
+event is an operational rule for official results, and compare-mode output
+is measurement data, not an official result.
+
+A `needs_review` review flag marks a pitch that a human must check against
+the original recording and the cited evidence before its score feeds an
+official decision. For participants: a low score or missing value caused
+by insufficient evidence does not mean the lowest rating was observed — it
+means the recording did not contain enough evidence to judge.
 
 `usage.json` includes `calculation_version:
 gemini-output-plus-thinking-v2`. Estimated cost is

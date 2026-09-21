@@ -6,9 +6,11 @@ import { tmpDir, sampleVideo } from './helpers.js';
 import { FixtureJudge, FixtureTranscriber } from '../src/providers/fixture/index.js';
 import type { ScoreInput, Usage } from '../src/providers/types.js';
 import { cmdRepeat } from '../src/cli/repeat.js';
-import { cmdRun } from '../src/cli/run.js';
+import { cmdRun, fillPrompt } from '../src/cli/run.js';
 import * as storage from '../src/core/storage.js';
-import { sha256File } from '../src/core/storage.js';
+import { sha256File, sha256Hex } from '../src/core/storage.js';
+import { computeInputHash } from '../src/core/input-hash.js';
+import type { FrozenInputsV2 } from '../src/core/schemas/artifacts.js';
 import { CliError, ProviderError } from '../src/core/errors.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -331,6 +333,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: repeatDir,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -352,6 +355,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -390,6 +394,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: repeatDir,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -438,6 +443,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -475,6 +481,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: path.join(tmpDir('judgathon-frozen-unshown-'), 'repeat'),
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -507,6 +514,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -542,6 +550,7 @@ describe('frozen inputs v2', () => {
           times: 5,
           providerMode: 'fixture',
           fixtureDir: path.join(ROOT, 'fixtures/default'),
+          promptsDir: path.join(ROOT, 'prompts'),
           outDir: out,
           pricingPath: path.join(ROOT, 'configs/pricing.json'),
           log: () => {},
@@ -607,6 +616,7 @@ describe('frozen inputs v2', () => {
           times: 5,
           providerMode: 'fixture',
           fixtureDir: path.join(ROOT, 'fixtures/default'),
+          promptsDir: path.join(ROOT, 'prompts'),
           outDir: out,
           pricingPath: path.join(ROOT, 'configs/pricing.json'),
           // And the diagnostic logger itself throws: even that must not mask
@@ -678,6 +688,7 @@ describe('frozen inputs v2', () => {
           times: 5,
           providerMode: 'fixture',
           fixtureDir: path.join(ROOT, 'fixtures/default'),
+          promptsDir: path.join(ROOT, 'prompts'),
           outDir: out,
           pricingPath: path.join(ROOT, 'configs/pricing.json'),
           log: () => {},
@@ -717,6 +728,7 @@ describe('frozen inputs v2', () => {
           times: 5,
           providerMode: 'fixture',
           fixtureDir: path.join(ROOT, 'fixtures/default'),
+          promptsDir: path.join(ROOT, 'prompts'),
           outDir: out,
           pricingPath: path.join(ROOT, 'configs/pricing.json'),
           log: () => {},
@@ -773,6 +785,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -797,6 +810,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -823,6 +837,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -846,6 +861,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -890,6 +906,7 @@ describe('frozen inputs v2', () => {
       times: 5,
       providerMode: 'fixture',
       fixtureDir: path.join(ROOT, 'fixtures/default'),
+      promptsDir: path.join(ROOT, 'prompts'),
       outDir: out,
       pricingPath: path.join(ROOT, 'configs/pricing.json'),
       log: () => {},
@@ -1099,5 +1116,163 @@ describe('run save-failure regression', () => {
       'judge',
       'judge',
     ]);
+  }, 240_000);
+});
+
+describe('repeat --output-language compare mode (§41.6)', () => {
+  let sourceDir: string;
+  let frozen: FrozenInputsV2;
+  beforeAll(async () => {
+    const dir = tmpDir('judgathon-compare-');
+    sourceDir = path.join(dir, 'run');
+    await cmdRun({
+      video: sampleVideo(),
+      rubricPath: path.join(ROOT, 'rubrics/hackathon-2026-v3.yaml'),
+      configPath: path.join(ROOT, 'configs/judge-google-v2.yaml'),
+      outDir: sourceDir,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      videoSource: 'screen',
+      promptsDir: path.join(ROOT, 'prompts'),
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      log: () => {},
+    });
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(sourceDir, 'manifest.json'), 'utf8'),
+    ) as { frozen_inputs: FrozenInputsV2 };
+    frozen = manifest.frozen_inputs;
+  }, 240_000);
+
+  const repeatArgs = (repOut: string, extra: string[] = []) => [
+    'repeat', '--from', sourceDir, '--times', '5', '--provider-mode', 'fixture',
+    ...extra, '--out', repOut,
+  ];
+
+  it('C01 re-fills only the judge prompt language and records derived hashes', async () => {
+    const repOut = path.join(tmpDir('judgathon-compare-en-'), 'repeat');
+    const rep = runCli(repeatArgs(repOut, ['--output-language', 'en']));
+    expect(rep.status, rep.stderr).toBe(0);
+    const report = JSON.parse(await fs.readFile(path.join(repOut, 'repeat-report.json'), 'utf8'));
+    expect(report.status).toBe('pass');
+    expect(report.output_language_compare).toEqual({ from: 'ja', to: 'en' });
+    expect(report.source_input_hash).toBe(frozen.input_hash);
+    expect(report.input_hash).not.toBe(frozen.input_hash);
+
+    const template = await fs.readFile(path.join(ROOT, 'prompts', 'absolute-score-v1.md'), 'utf8');
+    const enSha = sha256Hex(fillPrompt(template, { output_language: 'en' }));
+    const expectedInputHash = computeInputHash({
+      hash_version: frozen.hash_version,
+      transcript_sha256: frozen.transcript_sha256,
+      evidence_set_sha256: frozen.evidence_set_sha256,
+      config_snapshot_sha256: frozen.config_snapshot_sha256,
+      rubric_snapshot_sha256: frozen.rubric_snapshot_sha256,
+      selected_frames: frozen.selected_frames,
+      prompt_hashes: { ...frozen.prompt_hashes, judge: enSha },
+      judge_schema_sha256: frozen.judge_schema_sha256,
+      review_flags_extra: frozen.review_flags_extra,
+    });
+    expect(report.input_hash).toBe(expectedInputHash);
+
+    const judgeRun = JSON.parse(
+      await fs.readFile(path.join(repOut, 'runs', '01', 'judge-run.json'), 'utf8'),
+    );
+    expect(judgeRun.effective_settings.prompt_sha256).toBe(enSha);
+    expect(judgeRun.input_hash).toBe(report.input_hash);
+    expect(report.runs).toHaveLength(5);
+  }, 240_000);
+
+  it('C02 passes the substituted prompt text to the judge', async () => {
+    const calls: ScoreInput[] = [];
+    const originalScore = FixtureJudge.prototype.score;
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      calls.push(input);
+      return originalScore.call(this, input);
+    });
+    try {
+      const repeat = await cmdRepeat({
+        fromDir: sourceDir,
+        times: 5,
+        providerMode: 'fixture',
+        fixtureDir: path.join(ROOT, 'fixtures/default'),
+        promptsDir: path.join(ROOT, 'prompts'),
+        outputLanguage: 'en',
+        outDir: path.join(tmpDir('judgathon-compare-prompt-'), 'repeat'),
+        pricingPath: path.join(ROOT, 'configs/pricing.json'),
+        log: () => {},
+      });
+      expect(repeat.status).toBe('pass');
+    } finally {
+      spy.mockRestore();
+    }
+    const template = await fs.readFile(path.join(ROOT, 'prompts', 'absolute-score-v1.md'), 'utf8');
+    const expectedText = fillPrompt(template, { output_language: 'en' });
+    expect(calls).toHaveLength(15);
+    for (const call of calls) {
+      expect(call.promptText).toBe(expectedText);
+    }
+  }, 240_000);
+
+  it('C03 a tag equal to the frozen language behaves like a normal repeat', async () => {
+    const repOut = path.join(tmpDir('judgathon-compare-same-'), 'repeat');
+    const rep = runCli(repeatArgs(repOut, ['--output-language', 'ja']));
+    expect(rep.status, rep.stderr).toBe(0);
+    const report = JSON.parse(await fs.readFile(path.join(repOut, 'repeat-report.json'), 'utf8'));
+    expect(report.input_hash).toBe(frozen.input_hash);
+    expect(report).not.toHaveProperty('source_input_hash');
+    expect(report).not.toHaveProperty('output_language_compare');
+    const judgeRun = JSON.parse(
+      await fs.readFile(path.join(repOut, 'runs', '01', 'judge-run.json'), 'utf8'),
+    );
+    expect(judgeRun.effective_settings.prompt_sha256).toBe(frozen.prompt_hashes.judge);
+  }, 240_000);
+
+  it('C04 rejects an invalid BCP 47 tag with INVALID_LANGUAGE exit 2 before writing out dir', async () => {
+    const repOut = path.join(tmpDir('judgathon-compare-bad-'), 'repeat');
+    const rep = runCli(repeatArgs(repOut, ['--output-language', '!!bogus!!']));
+    expect(rep.status).toBe(2);
+    expect(JSON.parse(rep.stdout.trim()).error.code).toBe('INVALID_LANGUAGE');
+    expect(await fs.stat(repOut).then(() => true).catch(() => false)).toBe(false);
+  }, 240_000);
+
+  it('C05 rejects a prompts-dir whose template does not reproduce the frozen prompt', async () => {
+    const dir = tmpDir('judgathon-compare-prompts-');
+    const promptsDir = path.join(dir, 'prompts');
+    await fs.mkdir(promptsDir, { recursive: true });
+    const template = await fs.readFile(path.join(ROOT, 'prompts', 'absolute-score-v1.md'), 'utf8');
+    await fs.writeFile(path.join(promptsDir, 'absolute-score-v1.md'), `${template}\nedited\n`);
+    const repOut = path.join(dir, 'repeat');
+    const rep = runCli(repeatArgs(repOut, ['--output-language', 'en', '--prompts-dir', promptsDir]));
+    expect(rep.status).toBe(2);
+    expect(JSON.parse(rep.stdout.trim()).error.code).toBe('INPUT_INVALID');
+    expect(await fs.stat(repOut).then(() => true).catch(() => false)).toBe(false);
+  }, 240_000);
+
+  it('C06 rejects a prompts-dir missing the judge template with CONFIG_INVALID', async () => {
+    const dir = tmpDir('judgathon-compare-noprompt-');
+    const repOut = path.join(dir, 'repeat');
+    const rep = runCli(repeatArgs(repOut, ['--output-language', 'en', '--prompts-dir', dir]));
+    expect(rep.status).toBe(2);
+    expect(JSON.parse(rep.stdout.trim()).error.code).toBe('CONFIG_INVALID');
+  }, 240_000);
+
+  it('C07 still rejects a tampered transcript in compare mode', async () => {
+    const dir = tmpDir('judgathon-compare-tamper-');
+    const copy = path.join(dir, 'run');
+    await fs.cp(sourceDir, copy, { recursive: true });
+    const tPath = path.join(copy, 'transcript.json');
+    const t = JSON.parse(await fs.readFile(tPath, 'utf8'));
+    t.segments[0].text = `${t.segments[0].text} tampered`;
+    await fs.writeFile(tPath, `${JSON.stringify(t)}\n`);
+    const repOut = path.join(dir, 'repeat');
+    const rep = runCli([
+      'repeat', '--from', copy, '--times', '5', '--provider-mode', 'fixture',
+      '--output-language', 'en', '--out', repOut,
+    ]);
+    expect(rep.status).toBe(2);
+    expect(JSON.parse(rep.stdout.trim()).error.code).toBe('INPUT_HASH_MISMATCH');
+    expect(await fs.stat(repOut).then(() => true).catch(() => false)).toBe(false);
   }, 240_000);
 });

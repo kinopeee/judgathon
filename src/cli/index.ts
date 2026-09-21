@@ -13,7 +13,8 @@ import { cmdRepeat } from './repeat.js';
  *                    [--fixture-dir <dir>] [--video-source screen|camera]
  *                    [--prompts-dir <dir>] [--pricing <json>] --out <dir>
  *   judgathon repeat --from <run dir> --times 5 --provider-mode <mode>
- *                    [--fixture-dir <dir>] --out <dir>
+ *                    [--fixture-dir <dir>] [--prompts-dir <dir>]
+ *                    [--output-language <bcp47>] --out <dir>
  *
  * stdout: one JSON line (run_id/status/artifacts or error envelope).
  * stderr: progress lines — never transcript text, never secrets.
@@ -113,6 +114,8 @@ async function main(): Promise<number> {
           times: { type: 'string', default: '5' },
           'provider-mode': { type: 'string' },
           'fixture-dir': { type: 'string', default: 'fixtures/default' },
+          'prompts-dir': { type: 'string', default: 'prompts' },
+          'output-language': { type: 'string' },
           pricing: { type: 'string', default: 'configs/pricing.json' },
           out: { type: 'string' },
         },
@@ -134,6 +137,8 @@ async function main(): Promise<number> {
         times,
         providerMode: v['provider-mode'],
         fixtureDir: path.resolve(v['fixture-dir']!),
+        promptsDir: path.resolve(v['prompts-dir']!),
+        ...(v['output-language'] !== undefined ? { outputLanguage: v['output-language'] } : {}),
         outDir: path.resolve(v['out']!),
         pricingPath: path.resolve(v['pricing']!),
       });
