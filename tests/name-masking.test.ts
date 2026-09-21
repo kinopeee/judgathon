@@ -43,6 +43,12 @@ describe('name masking', () => {
     expect(applyNameMask('team alpha', map)).toBe('team A');
   });
 
+  it('assigns labels by match position when notations are mixed in one text', () => {
+    const map = buildNameMaskMap(['Team Phoenix の後に チームAlpha']);
+    expect(map.get('Team Phoenix')).toBe('Team A');
+    expect(map.get('チームAlpha')).toBe('チームB');
+  });
+
   it('is deterministic and order-dependent', () => {
     const texts = ['Team Phoenix leads', 'チームAlpha follows'];
     const a = buildNameMaskMap(texts);

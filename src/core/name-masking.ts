@@ -31,19 +31,22 @@ export function buildNameMaskMap(texts: string[]): Map<string, string> {
   const map = new Map<string, string>();
   const labels = new Map<string, string>();
   for (const text of texts) {
-    for (const pattern of TEAM_NAME_PATTERNS) {
+    const matches: Array<{ index: number; patternIndex: number; full: string; name: string }> = [];
+    for (const [patternIndex, pattern] of TEAM_NAME_PATTERNS.entries()) {
       const re = new RegExp(pattern.source, pattern.flags);
       for (const m of text.matchAll(re)) {
-        const full = m[0];
-        const name = m[1]!;
-        if (map.has(full)) continue;
-        let label = labels.get(name);
-        if (label === undefined) {
-          label = labelFor(labels.size);
-          labels.set(name, label);
-        }
-        map.set(full, full.slice(0, full.length - name.length) + label);
+        matches.push({ index: m.index, patternIndex, full: m[0], name: m[1]! });
       }
+    }
+    matches.sort((a, b) => a.index - b.index || a.patternIndex - b.patternIndex);
+    for (const { full, name } of matches) {
+      if (map.has(full)) continue;
+      let label = labels.get(name);
+      if (label === undefined) {
+        label = labelFor(labels.size);
+        labels.set(name, label);
+      }
+      map.set(full, full.slice(0, full.length - name.length) + label);
     }
   }
   return map;
