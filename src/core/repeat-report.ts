@@ -44,6 +44,8 @@ export function buildRepeatReport(opts: {
   runs: Array<{ index: number; path: string; status: string; run_id: string | null }>;
   criterionIds: string[];
   perRunLevels: Array<Map<string, string | null> | null>; // null = run failed
+  /** frozen input hash of the source run — set for output-language compare mode */
+  sourceInputHash?: string;
   /** set when the judge prompt's output_language was swapped for comparison */
   outputLanguageCompare?: { from: string; to: string };
 }): Record<string, unknown> {
@@ -74,6 +76,9 @@ export function buildRepeatReport(opts: {
     status,
     threshold: { sigma_max: SIGMA_MAX.toString(), spec_version: REPEAT_SPEC_VERSION },
   };
+  if (opts.sourceInputHash !== undefined) {
+    report['source_input_hash'] = opts.sourceInputHash;
+  }
   if (opts.outputLanguageCompare !== undefined) {
     report['output_language_compare'] = {
       from: opts.outputLanguageCompare.from,

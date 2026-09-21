@@ -350,36 +350,41 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
     const reproduced = sha256Hex(fillPrompt(template.text, { output_language: frozenLang }));
     if (reproduced !== frozenPromptHashes.judge) {
       throw new CliError(
-        'INPUT_HASH_MISMATCH',
-        `judge prompt template '${template.version}' does not reproduce the frozen judge prompt hash`,
+        'INPUT_INVALID',
+        `judge prompt '${judgeEntry.prompt_version}' under --prompts-dir does not reproduce the frozen judge prompt`,
         2,
         'validate_input',
       );
     }
-    const text = fillPrompt(template.text, { output_language: targetLang });
-    judgePrompt = {
-      version: template.version,
-      path: template.path,
-      sha256: sha256Hex(text),
-      text,
-    };
-    inputHash = computeInputHash({
-      hash_version: frozenInputs.hash_version,
-      transcript_sha256: transcriptSha256,
-      evidence_set_sha256: evidenceSetSha256,
-      config_snapshot_sha256: configSnapshotSha256,
-      rubric_snapshot_sha256: rubricSnapshotSha256,
-      selected_frames: frozenInputs.selected_frames.map((frame) => ({
-        frame_id: frame.frame_id,
-        timestamp_ms: frame.timestamp_ms,
-        sha256: frame.sha256,
-      })),
-      prompt_hashes: { ...frozenPromptHashes, judge: judgePrompt.sha256 },
-      judge_schema_sha256: currentJudgeSchemaSha256,
-      review_flags_extra: frozenInputs.review_flags_extra,
-    });
-    outputLanguageCompare = { from: frozenLang, to: targetLang };
-    log(`[repeat] output_language compare: ${frozenLang} -> ${targetLang}`);
+    // Same normalized tag as the frozen run: behave exactly like a normal
+    // repeat — no prompt substitution, no derived input_hash, no compare
+    // metadata in the report.
+    if (targetLang !== frozenLang) {
+      const text = fillPrompt(template.text, { output_language: targetLang });
+      judgePrompt = {
+        version: template.version,
+        path: template.path,
+        sha256: sha256Hex(text),
+        text,
+      };
+      inputHash = computeInputHash({
+        hash_version: frozenInputs.hash_version,
+        transcript_sha256: transcriptSha256,
+        evidence_set_sha256: evidenceSetSha256,
+        config_snapshot_sha256: configSnapshotSha256,
+        rubric_snapshot_sha256: rubricSnapshotSha256,
+        selected_frames: frozenInputs.selected_frames.map((frame) => ({
+          frame_id: frame.frame_id,
+          timestamp_ms: frame.timestamp_ms,
+          sha256: frame.sha256,
+        })),
+        prompt_hashes: { ...frozenPromptHashes, judge: judgePrompt.sha256 },
+        judge_schema_sha256: currentJudgeSchemaSha256,
+        review_flags_extra: frozenInputs.review_flags_extra,
+      });
+      outputLanguageCompare = { from: frozenLang, to: targetLang };
+      log(`[repeat] output_language compare: ${frozenLang} -> ${targetLang}`);
+    }
   }
 
   // Providers (incl. credential check) before creating the output dir.
@@ -612,7 +617,9 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
       runs,
       criterionIds,
       perRunLevels,
-      ...(outputLanguageCompare !== undefined ? { outputLanguageCompare } : {}),
+      ...(outputLanguageCompare !== undefined
+        ? { sourceInputHash: frozenInputs.input_hash, outputLanguageCompare }
+        : {}),
     });
     const reportPath = path.join(opts.outDir, 'repeat-report.json');
     await writeJsonAtomic(reportPath, report);
