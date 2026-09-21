@@ -339,6 +339,14 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
       );
     }
     const template = await loadPrompt(opts.promptsDir, judgeEntry.prompt_version);
+    if (!template.text.includes('{{output_language}}')) {
+      throw new CliError(
+        'INPUT_INVALID',
+        `judge prompt template '${template.version}' does not contain {{output_language}}; cannot perform output-language comparison`,
+        2,
+        'validate_input',
+      );
+    }
     const reproduced = sha256Hex(fillPrompt(template.text, { output_language: frozenLang }));
     if (reproduced !== frozenPromptHashes.judge) {
       throw new CliError(

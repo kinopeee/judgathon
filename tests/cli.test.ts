@@ -949,6 +949,33 @@ describe('frozen inputs v2', () => {
     expect(JSON.parse(res.stdout.trim()).error.code).toBe('INVALID_LANGUAGE');
   });
 
+  it('L04-repeat --output-language with a placeholder-less template -> INPUT_INVALID', async () => {
+    const dir = tmpDir('judgathon-lang-noplaceholder-');
+    const promptsCopy = path.join(dir, 'prompts');
+    await fs.cp(path.join(ROOT, 'prompts'), promptsCopy, { recursive: true });
+    const templatePath = path.join(promptsCopy, 'absolute-score-v1.md');
+    await fs.writeFile(
+      templatePath,
+      (await fs.readFile(templatePath, 'utf8')).replaceAll('{{output_language}}', 'en'),
+    );
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      outputLanguage: 'en',
+      promptsDir: promptsCopy,
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'INPUT_INVALID', exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
   it.each([
     ['hash_version=1', (value: Record<string, unknown>) => {
       (value.frozen_inputs as { hash_version: number }).hash_version = 1;
