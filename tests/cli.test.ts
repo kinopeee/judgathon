@@ -894,6 +894,7 @@ describe('frozen inputs v2', () => {
       await fs.readFile(path.join(out, 'repeat-report.json'), 'utf8'),
     ) as {
       input_hash: string;
+      source_input_hash: string;
       output_language_compare: { from: string; to: string };
       source_run_id: string;
     };
@@ -905,6 +906,7 @@ describe('frozen inputs v2', () => {
       frozen_inputs: { input_hash: string; prompt_hashes: { judge: string } };
     };
     expect(report.source_run_id).toBe(srcManifest.run_id);
+    expect(report.source_input_hash).toBe(srcManifest.frozen_inputs.input_hash);
     // The recomputed input hash differs (judge prompt hash changed) while the
     // frozen bundle was still verified first.
     expect(report.input_hash).not.toBe(srcManifest.frozen_inputs.input_hash);
@@ -916,7 +918,7 @@ describe('frozen inputs v2', () => {
     );
   });
 
-  it('L02-repeat --output-language with a tampered template -> INPUT_HASH_MISMATCH', async () => {
+  it('L02-repeat --output-language with a tampered template -> INPUT_INVALID', async () => {
     const dir = tmpDir('judgathon-lang-tamper-');
     const promptsCopy = path.join(dir, 'prompts');
     await fs.cp(path.join(ROOT, 'prompts'), promptsCopy, { recursive: true });
@@ -933,7 +935,7 @@ describe('frozen inputs v2', () => {
       outputLanguage: 'en',
       promptsDir: promptsCopy,
       log: () => {},
-    })).rejects.toMatchObject({ code: 'INPUT_HASH_MISMATCH', exitCode: 2 });
+    })).rejects.toMatchObject({ code: 'INPUT_INVALID', exitCode: 2 });
     expect(spy).not.toHaveBeenCalled();
     expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
     spy.mockRestore();
@@ -974,6 +976,63 @@ describe('frozen inputs v2', () => {
     expect(spy).not.toHaveBeenCalled();
     expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
     spy.mockRestore();
+  });
+
+  it('L05-repeat --output-language equal to the frozen tag is a plain repeat', async () => {
+    const dir = tmpDir('judgathon-lang-same-');
+    const out = path.join(dir, 'repeat');
+    const res = await cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      outputLanguage: 'JA',
+      promptsDir: path.join(ROOT, 'prompts'),
+      log: () => {},
+    });
+    expect(res.status).toBe('pass');
+    const report = JSON.parse(
+      await fs.readFile(path.join(out, 'repeat-report.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    const srcManifest = JSON.parse(
+      await fs.readFile(path.join(sourceDir, 'manifest.json'), 'utf8'),
+    ) as {
+      frozen_inputs: { input_hash: string; prompt_hashes: { judge: string } };
+    };
+    expect(report['input_hash']).toBe(srcManifest.frozen_inputs.input_hash);
+    expect('source_input_hash' in report).toBe(false);
+    expect('output_language_compare' in report).toBe(false);
+    const childJudgeRun = JSON.parse(
+      await fs.readFile(path.join(out, 'runs', '01', 'judge-run.json'), 'utf8'),
+    ) as { effective_settings: { prompt_sha256: string } };
+    expect(childJudgeRun.effective_settings.prompt_sha256).toBe(
+      srcManifest.frozen_inputs.prompt_hashes.judge,
+    );
+  });
+
+  it('L05b-same-language compare ignores --prompts-dir entirely', async () => {
+    const dir = tmpDir('judgathon-lang-same-noprompts-');
+    const out = path.join(dir, 'repeat');
+    // Identical to a normal repeat: the judge template is never loaded, so a
+    // prompts dir without the template cannot fail the run.
+    const res = await cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      outputLanguage: 'ja',
+      promptsDir: path.join(dir, 'empty-prompts'),
+      log: () => {},
+    });
+    expect(res.status).toBe('pass');
+    const report = JSON.parse(
+      await fs.readFile(path.join(out, 'repeat-report.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect('output_language_compare' in report).toBe(false);
   });
 
   it.each([

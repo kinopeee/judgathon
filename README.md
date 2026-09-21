@@ -57,12 +57,15 @@ judge prompt's `{{output_language}}` replaced by `<tag>`, keeping the frozen
 transcript / evidence-set / frames. The prompt template is loaded from
 `--prompts-dir` (default `prompts`) using the frozen config's `prompt_version`;
 it is verified by re-substituting the frozen `output_language` and matching the
-frozen `prompt_hashes.judge` (mismatch → `INPUT_HASH_MISMATCH`), then
-re-substituted with `<tag>`. `input_hash` is recomputed with the new judge
-prompt hash, and `repeat-report.json` records `source_run_id` and
-`output_language_compare: {from, to}`. §4.4's "fixed within an event" is an
-operational rule for official results; this mode is for evaluation only and
-must not be used to produce official event results in another language.
+frozen `prompt_hashes.judge` (mismatch → `INPUT_INVALID`), then
+re-substituted with `<tag>`. When the normalized `<tag>` differs from the
+frozen language, `input_hash` is recomputed with the new judge prompt hash and
+`repeat-report.json` records `source_input_hash` (the frozen input hash) plus
+`output_language_compare: {from, to}`; when the tags are identical the run is a
+plain repeat and none of the comparison fields are emitted. §4.4's "fixed
+within an event" is an operational rule for official results; this mode is for
+evaluation only and must not be used to produce official event results in
+another language.
 
 ## Review and interpretation
 
