@@ -67,6 +67,20 @@ within an event" is an operational rule for official results; this mode is for
 evaluation only and must not be used to produce official event results in
 another language.
 
+### Judge input masking
+
+Setting `judges[0].name_masking: true` (see `configs/judge-google-v5.yaml`)
+masks `チーム<Name>` / `Team <Name>` occurrences in the transcript segment
+texts and evidence descriptions passed to the judge — first occurrence order
+gets labels A, B, … (`Team Alpha` → `Team A`). `transcript.json` and
+`evidence-set.json` stay verbatim; the run manifest and each repeat child
+manifest record the replacement table as
+`judge_input_mask: {enabled, replacements}`. The map is deterministic, so
+`repeat` recomputes the same table from the frozen artifacts. Frame images
+are not masked. Because the field lives in the config snapshot, enabling it
+changes `config_snapshot_sha256` and therefore `input_hash` (`hash_version`
+is unchanged).
+
 ## Review and interpretation
 
 `needs_review` flags are for human verification: before a flagged run's scores
@@ -74,6 +88,13 @@ are used for an official decision, a human checks the original recording and
 the flagged evidence, and records the review (target run, flagged items, the
 transcript/frame locations consulted, and the judgment). The CLI intentionally
 offers no deterministic overrides or score editing.
+
+For fairness operations on comparison runs (`repeat --output-language`,
+nameswap variant inputs, and other sensitivity inputs): a criterion whose
+|Δ| between the compared means exceeds 0.5 is escalated to human review as
+`needs_review`-equivalent. Note that `needs_review` itself only fires on
+within-run sample disagreement and does not detect a consistent small bias
+(the v4 nameswap measurement did not trigger it).
 
 For participants: a criterion with insufficient evidence is judged
 `level: null` ("cannot be judged from this material") and aggregates to 0

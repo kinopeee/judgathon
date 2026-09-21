@@ -1,0 +1,38 @@
+schema_version: 1
+id: judge-google-v5
+output_language: ja
+
+transcriber:
+  provider: google
+  model: gemini-3.8-flash
+  prompt_version: transcribe-v2
+  temperature: 0
+
+evidence_extractor:
+  provider: google
+  model: gemini-3.8-flash
+  prompt_version: evidence-v3
+  temperature: 0
+  thinking: low
+
+judges:
+  - id: gemini
+    provider: google
+    model: gemini-3.8-flash
+    prompt_version: absolute-score-v3
+    temperature: 0
+    thinking: low
+    name_masking: true
+
+samples_per_judge: 3
+
+aggregation:
+  method: median
+
+ranking:
+  mode: absolute_only
+
+frame_selection:
+  dedupe_phash_distance: 8
+  max_extraction_frames: 120
+  max_frames_per_pitch: 24

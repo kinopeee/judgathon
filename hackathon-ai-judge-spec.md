@@ -2586,6 +2586,10 @@ Selected Framesが0枚ならAudio-onlyとして採点できるが、映像の欠
 
 **感度・言語差（実APIの品質ゲート）**: 基準と変異それぞれ1つの凍結EvidenceSetを生成し、Judge設定はoutput_languageの比較時にその言語だけを変え、それ以外は共通にして各5回採点する。デモ除去はdemo / technical_executionの5回平均が基準よりそれぞれ1 level以上低いこと、課題説明除去はproblem_valueが1以上低いことを要求する。対象Criterionは基準平均2以上のfixtureを用意する。非対象Criterion、インジェクション・名前変更・ピッチ言語差・output_language差は各Criterion平均の絶対差≤0.5を要求する。null / 欠損は未評価。インジェクション変異は5回とも検出trueを要求する。言語検証は出力のstatement / reasonを人手で確認し、原文引用は翻訳しなくてよい。差が0であることを全単発リクエストに要求しない。スライドのみの変異はtechnical_executionの5回平均が1〜2に収まることを要求する。対象外Criterionへの影響が避けられない変異は、その理由を測定前に記録して別fixtureとして扱い、測定後に対象外項目を除外しない。Phase 0ではoutput_language差の測定を `repeat --output-language <tag>` で行う（凍結入力を共有し、Judgeプロンプトのoutput_languageのみ差し替える評価専用モード。reportは派生input_hashと`source_input_hash`・`output_language_compare`を記録する）。
 
+**Judge入力マスキング**: `judges[0].name_masking` が true のとき、Judgeに渡すTranscriptセグメント本文とEvidence descriptionのみ、`チーム<名>` / `Team <名>` を初出順の英字ラベル（A, B, …）へ決定的に置換する。transcript.json / evidence-set.json は原文を維持し、manifestに `judge_input_mask: {enabled, replacements}` として置換表を記録する。フレーム画像は対象外。config snapshot経由でinput_hashが変わる（hash_versionは不変）。既知の限界: 「チーム」接頭辞のない技術名は対象外だが「チームStripe決済」のような語は誤マスクの余地がある。ひらがな・漢字後続（「チームで開発」等）は非対象。置換は決定的なのでrepeatは同一の置換表を再計算する。
+
+**公平性運用**: 比較run（`repeat --output-language`、nameswap変異、その他の感度入力）で、比較される平均間のCriterion差の絶対値が0.5を超える場合は人間レビューへエスカレートする（needs_review相当）。needs_review自体はrun内サンプル不一致のみで発火し、一貫した小さなバイアスは検出しない（v4のnameswap測定では発火しなかった）。
+
 **Evidence正確性**: 固定seed文字列`evidence-audit-v1`とEvidence IDを連結したSHA-256の昇順で30件を選び、ID順で同順位を解決する。30件未満なら全件、0件ならN/A。人手の判定をcorrect / incorrect / unverifiableとし、事実誤認、claimとobservationの混同、一次ソース不足をincorrectまたはunverifiableとして記録する。誤り率は`(incorrect + unverifiable) / reviewed_count`、合格は≤10%。ID一覧・判定理由・レビュー担当者を保存する。30件未満では参考値と明示し、実API品質ゲートは未完了とする。
 
 **人間との一致度（Phase 1）**: blind=trueかつ同一Rubricの提出済みHumanScoreのみを使い、Criterionごとに人間審査員levelの中央値（偶数は中央平均）を求める。比較対象審査員はイベント開始前に登録した非Organizerのblind評価担当者とし、全対象者のblind版が揃ったチームのみを比較する。複数のblind版があれば最後のblind版を用い、未提出チーム数・除外理由を報告する。順位指標の人間側はこのblind採点から算出した補正前Absolute順位、AI側は人間補正前のfinal Absolute順位とする。人間の正式順位・順位override後の結果は別欄に併記し、blind評価指標の入力へ混ぜない。
