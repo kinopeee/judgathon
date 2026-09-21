@@ -266,7 +266,7 @@ describe('fixture providers', () => {
     const ex = new FixtureExtractor(dir, () => ['tr_A']);
     const eres = await ex.extract({
       promptText: '', transcriptSegments: [], rubricCriteria: [],
-      frames: [{ frameId: 'frame_REAL', timestampMs: 0, path: 'x', source: 'screen' }],
+      frames: [{ frameId: 'frame_REAL', timestampMs: 0, path: 'x' }],
       schema: {},
     });
     const item = (eres.output as { evidence: Array<{ sources: Array<{ id: string }> }> }).evidence[0]!;

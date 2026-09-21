@@ -97,7 +97,7 @@ export interface JudgeStageResult {
   rawTexts: Array<{ sample: number; attempt: number; file: string }>;
 }
 
-function fillPrompt(text: string, vars: Record<string, string>): string {
+export function fillPrompt(text: string, vars: Record<string, string>): string {
   let out = text;
   for (const [k, v] of Object.entries(vars)) {
     out = out.split(`{{${k}}}`).join(v);
@@ -105,7 +105,7 @@ function fillPrompt(text: string, vars: Record<string, string>): string {
   return out;
 }
 
-async function loadPrompt(promptsDir: string, version: string): Promise<PromptRef> {
+export async function loadPrompt(promptsDir: string, version: string): Promise<PromptRef> {
   const p = path.join(promptsDir, `${version}.md`);
   let text: string;
   try {
@@ -240,7 +240,7 @@ export async function runJudgeStage(opts: {
   rubric: Rubric;
   evidenceForPrompt: unknown;
   transcriptSegments: TranscriptSegment[];
-  selectedFrames: Array<{ frame_id: string; timestamp_ms: number; path: string; source: string }>;
+  selectedFrames: Array<{ frame_id: string; timestamp_ms: number; path: string }>;
   validationCtx: {
     evidenceIds: Set<string>;
     transcriptIds: Set<string>;
@@ -293,7 +293,6 @@ export async function runJudgeStage(opts: {
             frameId: f.frame_id,
             timestampMs: f.timestamp_ms,
             path: f.path,
-            source: f.source,
           })),
           sampleIndex,
           schema: rawScoreJsonSchema,
@@ -416,7 +415,10 @@ export async function cmdRun(opts: RunOptions): Promise<{
     evidence_extractor: await loadPrompt(opts.promptsDir, config.evidence_extractor.prompt_version),
     judge: await loadPrompt(opts.promptsDir, config.judges[0]!.prompt_version),
   };
-  prompts.evidence_extractor.text = fillPrompt(prompts.evidence_extractor.text, { output_language: outputLanguage });
+  prompts.evidence_extractor.text = fillPrompt(prompts.evidence_extractor.text, {
+    output_language: outputLanguage,
+    video_source: opts.videoSource,
+  });
   prompts.evidence_extractor.sha256 = sha256Hex(prompts.evidence_extractor.text);
   prompts.judge.text = fillPrompt(prompts.judge.text, { output_language: outputLanguage });
   prompts.judge.sha256 = sha256Hex(prompts.judge.text);
@@ -659,7 +661,6 @@ export async function cmdRun(opts: RunOptions): Promise<{
             frameId: f.frame_id,
             timestampMs: f.timestamp_ms,
             path: path.join(outDir, frames.find((x) => x.frame_id === f.frame_id)!.path),
-            source: f.source,
           })),
           rubricCriteria: rubric.criteria.map((c) => ({
             id: c.id,
@@ -831,7 +832,6 @@ export async function cmdRun(opts: RunOptions): Promise<{
         frame_id: f.frame_id,
         timestamp_ms: f.timestamp_ms,
         path: path.join(outDir, f.path),
-        source: f.source,
       })),
       validationCtx: {
         evidenceIds: new Set(evidenceIds),

@@ -10,7 +10,7 @@ You receive:
 2. The EvidenceSet: a list of evidence items `{id, kind, description, sources}`; ids look
    like `ev_...`. Sources reference transcript segments (`tr_...`) and frames (`frame_...`).
 3. The transcript segments `{id, start_ms, end_ms, text}`.
-4. Selected frames, each preceded by `frame_id=<id> t_ms=<timestamp> source=<screen|camera>`.
+4. Selected screen frames, each preceded by `frame_id=<id> t_ms=<timestamp>`.
 
 Rules:
 - Output ONLY JSON matching the provided response schema. No prose, no markdown.
