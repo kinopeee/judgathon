@@ -97,7 +97,7 @@ export interface JudgeStageResult {
   rawTexts: Array<{ sample: number; attempt: number; file: string }>;
 }
 
-function fillPrompt(text: string, vars: Record<string, string>): string {
+export function fillPrompt(text: string, vars: Record<string, string>): string {
   let out = text;
   for (const [k, v] of Object.entries(vars)) {
     out = out.split(`{{${k}}}`).join(v);
@@ -105,7 +105,7 @@ function fillPrompt(text: string, vars: Record<string, string>): string {
   return out;
 }
 
-async function loadPrompt(promptsDir: string, version: string): Promise<PromptRef> {
+export async function loadPrompt(promptsDir: string, version: string): Promise<PromptRef> {
   const p = path.join(promptsDir, `${version}.md`);
   let text: string;
   try {
@@ -245,6 +245,7 @@ export async function runJudgeStage(opts: {
     evidenceIds: Set<string>;
     transcriptIds: Set<string>;
     selectedFrameIds: Set<string>;
+    evidenceKinds: Map<string, 'claim' | 'observation' | 'limitation' | 'uncertainty'>;
   };
   reviewFlagsExtra: string[];
   /** Extractor-side injection flag — OR-ed into the scorecard (§41). */
@@ -303,6 +304,7 @@ export async function runJudgeStage(opts: {
           evidenceIds: opts.validationCtx.evidenceIds,
           transcriptIds: opts.validationCtx.transcriptIds,
           selectedFrameIds: opts.validationCtx.selectedFrameIds,
+          evidenceKinds: opts.validationCtx.evidenceKinds,
         }),
     );
     } catch (err) {
@@ -413,7 +415,10 @@ export async function cmdRun(opts: RunOptions): Promise<{
     evidence_extractor: await loadPrompt(opts.promptsDir, config.evidence_extractor.prompt_version),
     judge: await loadPrompt(opts.promptsDir, config.judges[0]!.prompt_version),
   };
-  prompts.evidence_extractor.text = fillPrompt(prompts.evidence_extractor.text, { output_language: outputLanguage });
+  prompts.evidence_extractor.text = fillPrompt(prompts.evidence_extractor.text, {
+    output_language: outputLanguage,
+    video_source: opts.videoSource,
+  });
   prompts.evidence_extractor.sha256 = sha256Hex(prompts.evidence_extractor.text);
   prompts.judge.text = fillPrompt(prompts.judge.text, { output_language: outputLanguage });
   prompts.judge.sha256 = sha256Hex(prompts.judge.text);
@@ -832,6 +837,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
         evidenceIds: new Set(evidenceIds),
         transcriptIds: new Set(transcriptIds),
         selectedFrameIds: new Set(selection.selected_frame_ids),
+        evidenceKinds: new Map(evidenceItems.map((e) => [e.id, e.kind])),
       },
       reviewFlagsExtra,
       extraInjectionSuspected: evidenceSetJson.injection_suspected,
