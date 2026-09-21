@@ -1,0 +1,20 @@
+## title
+FridgeNote, Team Alpha. We built an app that suggests recipes from the leftover ingredients in your fridge.
+
+## problem
+First, the problem. Food waste among people living alone is a serious issue. In Japan, 5.23 million tons of food is thrown away every year, and about half of it comes from households. Especially for people in their twenties and thirties living alone, everyone has experienced throwing away ingredients they could not finish. The existing approach is to search for dishes in a recipe app, but that only works when you already know what you want to cook, and it does not help consume leftovers.
+
+## solution
+FridgeNote reverses the idea. You just take a photo of the ingredients in your fridge, and it suggests recipes that use them up. Existing apps map a dish name to ingredients; we map ingredients to dishes. On top of that, we track expiration dates and prioritize recipes using ingredients that expire soon, which is our unique point.
+
+## tech
+Let me explain the technical architecture. The iOS app is implemented in Swift, and ingredient recognition uses object detection from the Vision framework. Recognition results are stored in Firestore via Cloud Functions, and recipe matching is a custom scoring algorithm over ingredient combinations and expiration dates. Accuracy was the hard part, so we fine-tuned the model specifically for photos taken inside refrigerators.
+
+## demo
+Now let's look at the demo. Open the app and take a photo of the fridge contents. It recognizes tomatoes, eggs, and onions, and shows them in a checklist. Pressing the recipe button shows three candidates: omelette, ratatouille, and Spanish omelette. Selecting the omelette shows the cooking steps, and missing ingredients are automatically added to a shopping list. If recognition fails, a manual fallback lets you correct ingredient names by hand.
+
+## feasibility
+Next, our plans. We will grow the recipe database from 300 to 3000 entries. The barriers are recipe copyright handling and the API cost of image recognition. We avoid the copyright issue by writing cooking steps ourselves, and we reduce cost by moving more recognition onto the device.
+
+## closing
+To summarize: FridgeNote tackles the clear problem of food waste with a novel ingredient-first approach to recipe suggestion. All core features work end to end. What remains unimplemented is Android support and nutrition display. Thank you for listening.
