@@ -131,7 +131,9 @@ export function validateEvidenceOutput(
  * Judge RawScoreOutput (§41.5). Criteria must cover the rubric exactly once;
  * level is int 1..5 or null; evidence state consistent; references limited to
  * this run's ev_* ids, tr_* ids and selected_frame_ids (an unselected frame is
- * invalid even if it exists in input_frame_ids).
+ * invalid even if it exists in input_frame_ids). `evidence_strength: strong`
+ * additionally requires observation-grade support: at least one cited ev_* of
+ * kind 'observation', or a directly cited selected frame_*.
  */
 export function validateScoreOutput(
   raw: unknown,
@@ -140,7 +142,7 @@ export function validateScoreOutput(
     evidenceIds: ReadonlySet<string>;
     transcriptIds: ReadonlySet<string>;
     selectedFrameIds: ReadonlySet<string>;
-    /** evidence id -> kind, for the strong-requires-observation rule */
+    /** evidence id -> kind, for the strong-requires-observation rule (a directly cited selected frame also counts) */
     evidenceKinds: ReadonlyMap<string, ValidatedEvidence['kind']>;
   },
 ): ValidationResult<RawScoreOutput> {
@@ -235,11 +237,13 @@ export function validateScoreOutput(
       }
       if (
         c.evidence_strength === 'strong' &&
-        ![...dedup].some((id) => ctx.evidenceKinds.get(id) === 'observation')
+        ![...dedup].some(
+          (id) => ctx.evidenceKinds.get(id) === 'observation' || ctx.selectedFrameIds.has(id),
+        )
       ) {
         errors.push({
           code: 'INVALID_EVIDENCE_STATE',
-          message: `criterion '${c.criterion_id}': evidence_strength 'strong' requires at least one cited ev_* with kind 'observation'`,
+          message: `criterion '${c.criterion_id}': evidence_strength 'strong' requires at least one cited ev_* with kind 'observation' or a directly cited selected frame_*`,
         });
       }
     }

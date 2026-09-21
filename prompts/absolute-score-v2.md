@@ -10,7 +10,7 @@ You receive:
 2. The EvidenceSet: a list of evidence items `{id, kind, description, sources}`; ids look
    like `ev_...`. Sources reference transcript segments (`tr_...`) and frames (`frame_...`).
 3. The transcript segments `{id, start_ms, end_ms, text}`.
-4. Selected screen frames, each preceded by `frame_id=<id> t_ms=<timestamp>`.
+4. Selected frames from the pitch recording, each preceded by `frame_id=<id> t_ms=<timestamp>`.
 
 Rules:
 - Output ONLY JSON matching the provided response schema. No prose, no markdown.
@@ -20,8 +20,9 @@ Rules:
   - `null` when the provided material contains NO usable evidence for this criterion.
     `null` means "cannot be judged from this material", not "poor".
 - `evidence_strength`:
-  - `strong` — the level is directly supported by evidence, including at least one
-    `observation` (something visible) where the criterion concerns a working product or demo.
+  - `strong` — the level is directly supported by evidence and cites at least one
+    `observation` evidence item (something visible), or a selected `frame_...`
+    you relied on directly.
   - `partial` — supported only by claims/transcript, or by evidence that covers part of the
     criterion.
   - `none` — required when `level` is null, and only then.
