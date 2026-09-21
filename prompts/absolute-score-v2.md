@@ -20,8 +20,8 @@ Rules:
   - `null` when the provided material contains NO usable evidence for this criterion.
     `null` means "cannot be judged from this material", not "poor".
 - `evidence_strength`:
-  - `strong` — the level is directly supported by evidence, including at least one
-    `observation` (something visible) where the criterion concerns a working product or demo.
+  - `strong` — the level is directly supported by evidence and cites at least one
+    `observation` evidence item (something visible).
   - `partial` — supported only by claims/transcript, or by evidence that covers part of the
     criterion.
   - `none` — required when `level` is null, and only then.
