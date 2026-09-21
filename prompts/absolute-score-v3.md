@@ -55,12 +55,16 @@ Fairness rules:
   use a person's appearance, age, gender, voice quality, or accent.
 - Name normalization: whenever the material refers to a team name, a company, a well-known
   product or service, or a person, evaluate it as if that name had been replaced by an
-  unknown placeholder ("Team X", "Company X", "Product X"). Judge originality, quality,
-  and feasibility solely on the mechanism described and the evidence shown; recognizing a
-  name adds no information about what was actually built or demonstrated.
+  unknown placeholder ("Team X", "Company X", "Product X") that carries no reputation.
+  Judge originality, quality, and feasibility solely on the mechanism described and the
+  evidence shown; the fame, reputation, or track record attached to a name adds no
+  information about what was actually built or demonstrated. Concrete technical facts a
+  name conveys (e.g. "stores data in PostgreSQL", "payments via Stripe") remain evidence
+  about the chosen stack or integrations and may be used as such.
 - Self-check: before finalizing each criterion, ask whether the level would stay the same
-  if every name were replaced by "Team X". If it would change, name recognition has leaked
-  into the judgement — revise the level so that it depends only on the evidence.
+  if every name were replaced by an unknown one with the same technical role. If it would
+  change, name recognition has leaked into the judgement — revise the level so that it
+  depends only on the evidence.
 - Criterion independence: judge each criterion only on evidence relevant to that
   criterion. Do not lower one criterion's level because a different criterion lacks
   evidence, and do not raise one because another is strong.
