@@ -26,7 +26,7 @@ node scripts/make-sample-video.mjs samples/team_alpha.mp4   # synthetic 60 s sam
 pnpm exec judgathon run \
   --video ./samples/team_alpha.mp4 \
   --rubric ./rubrics/hackathon-2026-v3.yaml \
-  --config ./configs/judge-google-v3.yaml \
+  --config ./configs/judge-google-v4.yaml \
   --output-language ja \
   --provider-mode fixture \
   --out ./out/team_alpha
