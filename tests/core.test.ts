@@ -131,12 +131,18 @@ describe('score output validation (§41.5)', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
   });
-  it('strong citing only tr_*/frame_* (no ev_*) -> INVALID_EVIDENCE_STATE', () => {
+  it('strong citing only tr_* (no ev_*, no frame cite) -> INVALID_EVIDENCE_STATE', () => {
     const out = scoreOutput([4, 4]);
-    out.criteria[0]!.evidence_ids = ['tr_0', 'frame_sel'];
+    out.criteria[0]!.evidence_ids = ['tr_0'];
     const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), CTX);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
+  });
+  it('strong citing a selected frame_* directly (extractor gap) -> ok', () => {
+    const out = scoreOutput([4, 4]);
+    out.criteria[0]!.evidence_ids = ['tr_0', 'frame_sel'];
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), CTX);
+    expect(res.ok).toBe(true);
   });
   it('partial citing only claim ev_* -> ok (rule applies to strong only)', () => {
     const out = scoreOutput([4, 4]);
