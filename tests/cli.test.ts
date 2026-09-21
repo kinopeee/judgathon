@@ -1012,6 +1012,29 @@ describe('frozen inputs v2', () => {
     );
   });
 
+  it('L05b-same-language compare ignores --prompts-dir entirely', async () => {
+    const dir = tmpDir('judgathon-lang-same-noprompts-');
+    const out = path.join(dir, 'repeat');
+    // Identical to a normal repeat: the judge template is never loaded, so a
+    // prompts dir without the template cannot fail the run.
+    const res = await cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      outputLanguage: 'ja',
+      promptsDir: path.join(dir, 'empty-prompts'),
+      log: () => {},
+    });
+    expect(res.status).toBe('pass');
+    const report = JSON.parse(
+      await fs.readFile(path.join(out, 'repeat-report.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect('output_language_compare' in report).toBe(false);
+  });
+
   it.each([
     ['hash_version=1', (value: Record<string, unknown>) => {
       (value.frozen_inputs as { hash_version: number }).hash_version = 1;

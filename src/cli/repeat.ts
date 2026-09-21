@@ -319,14 +319,6 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
         'validate_input',
       );
     }
-    if (opts.promptsDir === undefined) {
-      throw new CliError(
-        'INVALID_ARGS',
-        '--output-language requires --prompts-dir to load the judge prompt template',
-        2,
-        'validate_input',
-      );
-    }
     let frozenLang: string;
     try {
       frozenLang = Intl.getCanonicalLocales(config.output_language)[0]!;
@@ -338,28 +330,35 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
         'validate_input',
       );
     }
-    const template = await loadPrompt(opts.promptsDir, judgeEntry.prompt_version);
-    if (!template.text.includes('{{output_language}}')) {
-      throw new CliError(
-        'INPUT_INVALID',
-        `judge prompt template '${template.version}' does not contain {{output_language}}; cannot perform output-language comparison`,
-        2,
-        'validate_input',
-      );
-    }
-    const reproduced = sha256Hex(fillPrompt(template.text, { output_language: frozenLang }));
-    if (reproduced !== frozenPromptHashes.judge) {
-      throw new CliError(
-        'INPUT_INVALID',
-        `judge prompt '${judgeEntry.prompt_version}' under --prompts-dir does not reproduce the frozen judge prompt`,
-        2,
-        'validate_input',
-      );
-    }
-    // Same normalized tag as the frozen run: behave exactly like a normal
-    // repeat — no prompt substitution, no derived input_hash, no compare
-    // metadata in the report.
+    // Same normalized tag as the frozen run: identical to a normal repeat —
+    // no template load, no prompt substitution, no compare metadata.
     if (targetLang !== frozenLang) {
+      if (opts.promptsDir === undefined) {
+        throw new CliError(
+          'INVALID_ARGS',
+          '--output-language requires --prompts-dir to load the judge prompt template',
+          2,
+          'validate_input',
+        );
+      }
+      const template = await loadPrompt(opts.promptsDir, judgeEntry.prompt_version);
+      if (!template.text.includes('{{output_language}}')) {
+        throw new CliError(
+          'INPUT_INVALID',
+          `judge prompt template '${template.version}' does not contain {{output_language}}; cannot perform output-language comparison`,
+          2,
+          'validate_input',
+        );
+      }
+      const reproduced = sha256Hex(fillPrompt(template.text, { output_language: frozenLang }));
+      if (reproduced !== frozenPromptHashes.judge) {
+        throw new CliError(
+          'INPUT_INVALID',
+          `judge prompt '${judgeEntry.prompt_version}' under --prompts-dir does not reproduce the frozen judge prompt`,
+          2,
+          'validate_input',
+        );
+      }
       const text = fillPrompt(template.text, { output_language: targetLang });
       judgePrompt = {
         version: template.version,
