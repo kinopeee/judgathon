@@ -8,3 +8,4 @@ samples/**/media/
 *.wav
 .env*
 live-runs/
+.DS_Store
