@@ -855,6 +855,100 @@ describe('frozen inputs v2', () => {
     spy.mockRestore();
   });
 
+  it('L01-repeat --output-language swaps only the judge prompt and records the compare', async () => {
+    const dir = tmpDir('judgathon-lang-compare-');
+    const calls: string[] = [];
+    const originalScore = FixtureJudge.prototype.score;
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score').mockImplementation(async function (
+      this: FixtureJudge,
+      input,
+    ) {
+      calls.push(input.promptText);
+      return originalScore.call(this, input);
+    });
+    const out = path.join(dir, 'repeat');
+    const res = await cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      outputLanguage: 'en',
+      promptsDir: path.join(ROOT, 'prompts'),
+      log: () => {},
+    });
+    spy.mockRestore();
+    expect(res.status).toBe('pass');
+    expect(calls).toHaveLength(15);
+    const frozenPrompt = await fs.readFile(
+      path.join(sourceDir, 'prompts', 'judge', 'absolute-score-v1.md'),
+      'utf8',
+    );
+    expect(frozenPrompt).toContain('`ja`');
+    for (const text of calls) {
+      expect(text).toContain('`en`');
+      expect(text).not.toContain('`ja`');
+    }
+    const report = JSON.parse(
+      await fs.readFile(path.join(out, 'repeat-report.json'), 'utf8'),
+    ) as {
+      input_hash: string;
+      output_language_compare: { from: string; to: string };
+      source_run_id: string;
+    };
+    expect(report.output_language_compare).toEqual({ from: 'ja', to: 'en' });
+    const srcManifest = JSON.parse(
+      await fs.readFile(path.join(sourceDir, 'manifest.json'), 'utf8'),
+    ) as {
+      run_id: string;
+      frozen_inputs: { input_hash: string; prompt_hashes: { judge: string } };
+    };
+    expect(report.source_run_id).toBe(srcManifest.run_id);
+    // The recomputed input hash differs (judge prompt hash changed) while the
+    // frozen bundle was still verified first.
+    expect(report.input_hash).not.toBe(srcManifest.frozen_inputs.input_hash);
+    const childJudgeRun = JSON.parse(
+      await fs.readFile(path.join(out, 'runs', '01', 'judge-run.json'), 'utf8'),
+    ) as { effective_settings: { prompt_sha256: string } };
+    expect(childJudgeRun.effective_settings.prompt_sha256).not.toBe(
+      srcManifest.frozen_inputs.prompt_hashes.judge,
+    );
+  });
+
+  it('L02-repeat --output-language with a tampered template -> INPUT_HASH_MISMATCH', async () => {
+    const dir = tmpDir('judgathon-lang-tamper-');
+    const promptsCopy = path.join(dir, 'prompts');
+    await fs.cp(path.join(ROOT, 'prompts'), promptsCopy, { recursive: true });
+    await fs.appendFile(path.join(promptsCopy, 'absolute-score-v1.md'), '\nchanged');
+    const out = path.join(dir, 'repeat');
+    const spy = vi.spyOn(FixtureJudge.prototype, 'score');
+    await expect(cmdRepeat({
+      fromDir: sourceDir,
+      times: 5,
+      providerMode: 'fixture',
+      fixtureDir: path.join(ROOT, 'fixtures/default'),
+      outDir: out,
+      pricingPath: path.join(ROOT, 'configs/pricing.json'),
+      outputLanguage: 'en',
+      promptsDir: promptsCopy,
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'INPUT_HASH_MISMATCH', exitCode: 2 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await fs.stat(out).then(() => true).catch(() => false)).toBe(false);
+    spy.mockRestore();
+  });
+
+  it('L03-repeat --output-language rejects invalid BCP 47', async () => {
+    const dir = tmpDir('judgathon-lang-invalid-');
+    const res = runCli([
+      'repeat', '--from', sourceDir, '--times', '5', '--provider-mode', 'fixture',
+      '--output-language', 'not a tag!!', '--out', path.join(dir, 'repeat'),
+    ]);
+    expect(res.status).toBe(2);
+    expect(JSON.parse(res.stdout.trim()).error.code).toBe('INVALID_LANGUAGE');
+  });
+
   it.each([
     ['hash_version=1', (value: Record<string, unknown>) => {
       (value.frozen_inputs as { hash_version: number }).hash_version = 1;

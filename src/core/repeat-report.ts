@@ -44,6 +44,8 @@ export function buildRepeatReport(opts: {
   runs: Array<{ index: number; path: string; status: string; run_id: string | null }>;
   criterionIds: string[];
   perRunLevels: Array<Map<string, string | null> | null>; // null = run failed
+  /** set when the judge prompt's output_language was swapped for comparison */
+  outputLanguageCompare?: { from: string; to: string };
 }): Record<string, unknown> {
   const criteria: RepeatCriterionResult[] = opts.criterionIds.map((cid) => {
     const values = opts.perRunLevels.map((m) => (m === null ? null : (m.get(cid) ?? null)));
@@ -72,6 +74,12 @@ export function buildRepeatReport(opts: {
     status,
     threshold: { sigma_max: SIGMA_MAX.toString(), spec_version: REPEAT_SPEC_VERSION },
   };
+  if (opts.outputLanguageCompare !== undefined) {
+    report['output_language_compare'] = {
+      from: opts.outputLanguageCompare.from,
+      to: opts.outputLanguageCompare.to,
+    };
+  }
   if (opts.mode === 'fixture') {
     report['note'] = 'fixture mode: verifies aggregation mechanics only, not AI quality';
   }
