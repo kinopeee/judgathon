@@ -26,7 +26,7 @@ node scripts/make-sample-video.mjs samples/team_alpha.mp4   # synthetic 60 s sam
 pnpm exec judgathon run \
   --video ./samples/team_alpha.mp4 \
   --rubric ./rubrics/hackathon-2026-v3.yaml \
-  --config ./configs/judge-google-v2.yaml \
+  --config ./configs/judge-google-v3.yaml \
   --output-language ja \
   --provider-mode fixture \
   --out ./out/team_alpha
@@ -51,6 +51,31 @@ with `UNSUPPORTED_FROZEN_INPUT_VERSION` and must be run again with the current
 CLI. The v2 frozen input includes transcript, evidence-set, config and rubric
 snapshot hashes, ordered selected-frame records, all prompt hashes, the judge
 schema hash, normalized extra review flags, and the composite `input_hash`.
+
+`repeat` flags: `--output-language <tag>` re-runs the judge stage with only the
+judge prompt's `{{output_language}}` replaced by `<tag>`, keeping the frozen
+transcript / evidence-set / frames. The prompt template is loaded from
+`--prompts-dir` (default `prompts`) using the frozen config's `prompt_version`;
+it is verified by re-substituting the frozen `output_language` and matching the
+frozen `prompt_hashes.judge` (mismatch → `INPUT_HASH_MISMATCH`), then
+re-substituted with `<tag>`. `input_hash` is recomputed with the new judge
+prompt hash, and `repeat-report.json` records `source_run_id` and
+`output_language_compare: {from, to}`. §4.4's "fixed within an event" is an
+operational rule for official results; this mode is for evaluation only and
+must not be used to produce official event results in another language.
+
+## Review and interpretation
+
+`needs_review` flags are for human verification: before a flagged run's scores
+are used for an official decision, a human checks the original recording and
+the flagged evidence, and records the review (target run, flagged items, the
+transcript/frame locations consulted, and the judgment). The CLI intentionally
+offers no deterministic overrides or score editing.
+
+For participants: a criterion with insufficient evidence is judged
+`level: null` ("cannot be judged from this material") and aggregates to 0
+points. That 0 means no observable evidence was provided — it does not mean
+the lowest level of performance was observed.
 
 `usage.json` includes `calculation_version:
 gemini-output-plus-thinking-v2`. Estimated cost is
