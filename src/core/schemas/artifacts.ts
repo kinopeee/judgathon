@@ -82,6 +82,29 @@ const selectedFrameHashSchema = z
   })
   .strict();
 
+/**
+ * Read-side schema for `manifest.media.frames` (repeat only needs these four
+ * fields per frame record; extras are passed through).
+ */
+export const manifestMediaSchema = z.looseObject({
+  frames: z
+    .array(
+      z.looseObject({
+        frame_id: z.string().min(1),
+        path: z.string().min(1),
+        sha256: z.string().length(64),
+        timestamp_ms: z.number().int(),
+      }),
+    )
+    .optional(),
+});
+export type ManifestFrameRef = {
+  frame_id: string;
+  path: string;
+  sha256: string;
+  timestamp_ms: number;
+};
+
 export const frozenInputsV2Schema = z
   .object({
     hash_version: z.literal(2),

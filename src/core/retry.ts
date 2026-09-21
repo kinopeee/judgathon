@@ -57,6 +57,21 @@ export interface AttemptSuccess<T> {
   attempts: AttemptRecord[];
 }
 
+/**
+ * A CliError carrying the attempt records made before the failure, so callers
+ * can persist them to usage.json without casting.
+ */
+export class FailedAttemptError extends CliError {
+  readonly attempts: AttemptRecord[];
+
+  constructor(err: CliError, attempts: AttemptRecord[]) {
+    super(err.code, err.message, err.exitCode, err.stage);
+    this.name = 'FailedAttemptError';
+    if (err.cause !== undefined) this.cause = err.cause;
+    this.attempts = attempts;
+  }
+}
+
 const DEFAULT_BACKOFF_MS = [1000, 2000];
 
 export async function callWithAttempts<T>(
@@ -76,28 +91,31 @@ export async function callWithAttempts<T>(
     try {
       return await ctx.saveRaw(body);
     } catch (err) {
-      throw Object.assign(
-        new CliError(
-          'INTERNAL_ERROR',
-          err instanceof Error ? err.message : String(err),
-          3,
-          ctx.stage,
+      throw new FailedAttemptError(
+        Object.assign(
+          new CliError(
+            'INTERNAL_ERROR',
+            err instanceof Error ? err.message : String(err),
+            3,
+            ctx.stage,
+          ),
+          { cause: err },
         ),
-        { cause: err, attempts },
+        attempts,
       );
     }
   };
 
   for (let attempt = 0; attempt < ctx.maxAttempts; attempt++) {
     if (ctx.deadlineMs !== undefined && ctx.now() >= ctx.deadlineMs) {
-      throw Object.assign(
+      throw new FailedAttemptError(
         new CliError(
           'DEADLINE_EXCEEDED',
           `run deadline exceeded before ${ctx.operation} attempt ${attempt}`,
           3,
           ctx.stage,
         ),
-        { attempts: [...attempts] },
+        [...attempts],
       );
     }
     const started = ctx.now();
@@ -168,7 +186,8 @@ export async function callWithAttempts<T>(
     } catch (err) {
       // CliError from call/validate, or INTERNAL_ERROR from saveAttempt:
       // propagate as-is instead of misclassifying it as a provider failure.
-      if (err instanceof CliError) throw Object.assign(err, { attempts });
+      if (err instanceof FailedAttemptError) throw err;
+      if (err instanceof CliError) throw new FailedAttemptError(err, attempts);
       const latency = ctx.now() - started;
       const isTimeout = err instanceof ProviderError && err.kind === 'timeout';
       const code =
@@ -202,10 +221,7 @@ export async function callWithAttempts<T>(
         response_id: null,
       });
       if (!retryable) {
-        throw Object.assign(
-          new CliError(code, message, 3, ctx.stage),
-          { attempts },
-        );
+        throw new FailedAttemptError(new CliError(code, message, 3, ctx.stage), attempts);
       }
       const retryAfter = err instanceof ProviderError ? err.retryAfterMs : undefined;
       const backoff = DEFAULT_BACKOFF_MS[Math.min(attempt, DEFAULT_BACKOFF_MS.length - 1)]!;
@@ -223,7 +239,8 @@ export async function callWithAttempts<T>(
   const last = attempts[attempts.length - 1];
   const code = last?.status === 'validation_failed' ? 'PROVIDER_OUTPUT_INVALID' : (last?.error?.code ?? 'PROVIDER_OTHER');
   const message = last?.error?.message ?? 'provider call failed';
-  throw Object.assign(new CliError(code, `${ctx.operation}: ${message}`, 3, ctx.stage), {
+  throw new FailedAttemptError(
+    new CliError(code, `${ctx.operation}: ${message}`, 3, ctx.stage),
     attempts,
-  });
+  );
 }

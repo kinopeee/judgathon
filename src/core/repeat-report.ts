@@ -37,18 +37,39 @@ export function computeRepeatStats(values: Array<string | null>): {
   return { mean, sigma, status: sigma.lte(SIGMA_MAX) ? 'pass' : 'fail', missing };
 }
 
+export interface RepeatReportRun {
+  index: number;
+  path: string;
+  status: string;
+  run_id: string | null;
+}
+
+export interface RepeatReport {
+  schema_version: number;
+  source_run_id: string;
+  input_hash: string;
+  mode: 'fixture' | 'live';
+  runs: RepeatReportRun[];
+  criteria: RepeatCriterionResult[];
+  status: 'pass' | 'fail' | 'not_evaluated';
+  threshold: { sigma_max: string; spec_version: string };
+  source_input_hash?: string;
+  output_language_compare?: { from: string; to: string };
+  note?: string;
+}
+
 export function buildRepeatReport(opts: {
   sourceRunId: string;
   inputHash: string;
   mode: 'fixture' | 'live';
-  runs: Array<{ index: number; path: string; status: string; run_id: string | null }>;
+  runs: RepeatReportRun[];
   criterionIds: string[];
   perRunLevels: Array<Map<string, string | null> | null>; // null = run failed
   /** frozen input hash of the source run — set for output-language compare mode */
   sourceInputHash?: string;
   /** set when the judge prompt's output_language was swapped for comparison */
   outputLanguageCompare?: { from: string; to: string };
-}): Record<string, unknown> {
+}): RepeatReport {
   const criteria: RepeatCriterionResult[] = opts.criterionIds.map((cid) => {
     const values = opts.perRunLevels.map((m) => (m === null ? null : (m.get(cid) ?? null)));
     const { mean, sigma, status, missing } = computeRepeatStats(values);
@@ -66,7 +87,7 @@ export function buildRepeatReport(opts: {
   if (criteria.some((c) => c.status === 'na')) status = 'not_evaluated';
   else if (criteria.some((c) => c.status === 'fail')) status = 'fail';
 
-  const report: Record<string, unknown> = {
+  const report: RepeatReport = {
     schema_version: 1,
     source_run_id: opts.sourceRunId,
     input_hash: opts.inputHash,
@@ -75,18 +96,20 @@ export function buildRepeatReport(opts: {
     criteria,
     status,
     threshold: { sigma_max: SIGMA_MAX.toString(), spec_version: REPEAT_SPEC_VERSION },
+    ...(opts.sourceInputHash !== undefined
+      ? { source_input_hash: opts.sourceInputHash }
+      : {}),
+    ...(opts.outputLanguageCompare !== undefined
+      ? {
+          output_language_compare: {
+            from: opts.outputLanguageCompare.from,
+            to: opts.outputLanguageCompare.to,
+          },
+        }
+      : {}),
+    ...(opts.mode === 'fixture'
+      ? { note: 'fixture mode: verifies aggregation mechanics only, not AI quality' }
+      : {}),
   };
-  if (opts.sourceInputHash !== undefined) {
-    report['source_input_hash'] = opts.sourceInputHash;
-  }
-  if (opts.outputLanguageCompare !== undefined) {
-    report['output_language_compare'] = {
-      from: opts.outputLanguageCompare.from,
-      to: opts.outputLanguageCompare.to,
-    };
-  }
-  if (opts.mode === 'fixture') {
-    report['note'] = 'fixture mode: verifies aggregation mechanics only, not AI quality';
-  }
   return report;
 }
