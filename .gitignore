@@ -9,3 +9,4 @@ samples/**/media/
 .env*
 live-runs/
 .DS_Store
+.cursor/plans/*
