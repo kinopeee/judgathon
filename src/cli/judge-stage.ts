@@ -105,7 +105,7 @@ export async function runJudgeStage(opts: {
     evidenceIds: Set<string>;
     transcriptIds: Set<string>;
     selectedFrameIds: Set<string>;
-    evidenceKinds: Map<string, 'claim' | 'observation' | 'limitation' | 'uncertainty'>;
+    observationGradeIds: Set<string>;
   };
   reviewFlagsExtra: string[];
   /** Extractor-side injection flag — OR-ed into the scorecard (§41). */
@@ -164,7 +164,7 @@ export async function runJudgeStage(opts: {
           evidenceIds: opts.validationCtx.evidenceIds,
           transcriptIds: opts.validationCtx.transcriptIds,
           selectedFrameIds: opts.validationCtx.selectedFrameIds,
-          evidenceKinds: opts.validationCtx.evidenceKinds,
+          observationGradeIds: opts.validationCtx.observationGradeIds,
         }),
     );
     } catch (err) {

@@ -6,6 +6,7 @@ import { newJudgeRunId, newPitchId, newRunId } from '../core/ids.js';
 import { validateConfig, type JudgeConfig } from '../core/schemas/config.js';
 import { validateRubric, type Rubric } from '../core/schemas/rubric.js';
 import { FailedAttemptError, type AttemptRecord } from '../core/retry.js';
+import { observationGradeIds } from '../core/reference-validation.js';
 import {
   fileExists,
   isAbsentOrEmptyDir,
@@ -256,6 +257,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
 
     // Stage: judge
     log('[judge] scoring (3 samples)');
+    const selectedFrameIdSet = new Set(evidence.selection.selected_frame_ids);
     const judgeRes = await runJudgeStage({
       outDir,
       judge: providers.judge,
@@ -272,8 +274,8 @@ export async function cmdRun(opts: RunOptions): Promise<{
       validationCtx: {
         evidenceIds: new Set(ids.evidenceIds),
         transcriptIds: new Set(ids.transcriptIds),
-        selectedFrameIds: new Set(evidence.selection.selected_frame_ids),
-        evidenceKinds: new Map(evidence.evidenceItems.map((e) => [e.id, e.kind])),
+        selectedFrameIds: selectedFrameIdSet,
+        observationGradeIds: observationGradeIds(evidence.evidenceItems, selectedFrameIdSet),
       },
       reviewFlagsExtra: ctx.reviewFlagsExtra,
       extraInjectionSuspected: evidence.injectionSuspected,

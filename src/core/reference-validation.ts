@@ -77,6 +77,31 @@ export interface ValidatedEvidence {
 }
 
 /**
+ * Evidence ids that count as observation-grade support for a judge score
+ * (§41.4.6): kind 'observation' with at least one frame source actually
+ * presented to the judge (in selected_frame_ids). An observation whose frame
+ * sources were all thinned out under frame_reference_overflow was not
+ * visually observed, so a score depending only on it is capped at 'partial'.
+ */
+export function observationGradeIds(
+  items: ReadonlyArray<{
+    id: string;
+    kind: string;
+    sources: ReadonlyArray<{ type: string; id: string }>;
+  }>,
+  selectedFrameIds: ReadonlySet<string>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const e of items) {
+    if (e.kind !== 'observation') continue;
+    if (e.sources.some((s) => s.type === 'frame' && selectedFrameIds.has(s.id))) {
+      out.add(e.id);
+    }
+  }
+  return out;
+}
+
+/**
  * Evidence provider output. Sources: >=1, ids must be in the run's transcript
  * segment ids or input_frame_ids; observation needs >=1 frame source;
  * criterion_hints must be a subset of rubric criterion ids.
@@ -132,8 +157,9 @@ export function validateEvidenceOutput(
  * level is int 1..5 or null; evidence state consistent; references limited to
  * this run's ev_* ids, tr_* ids and selected_frame_ids (an unselected frame is
  * invalid even if it exists in input_frame_ids). `evidence_strength: strong`
- * additionally requires observation-grade support: at least one cited ev_* of
- * kind 'observation', or a directly cited selected frame_*.
+ * additionally requires observation-grade support: at least one cited ev_* in
+ * `observationGradeIds` (an observation backed by a presented frame, §41.4.6),
+ * or a directly cited selected frame_*.
  */
 export function validateScoreOutput(
   raw: unknown,
@@ -142,8 +168,8 @@ export function validateScoreOutput(
     evidenceIds: ReadonlySet<string>;
     transcriptIds: ReadonlySet<string>;
     selectedFrameIds: ReadonlySet<string>;
-    /** evidence id -> kind, for the strong-requires-observation rule (a directly cited selected frame also counts) */
-    evidenceKinds: ReadonlyMap<string, ValidatedEvidence['kind']>;
+    /** ev_* ids usable as observation-grade support for 'strong' (see `observationGradeIds`) */
+    observationGradeIds: ReadonlySet<string>;
   },
 ): ValidationResult<RawScoreOutput> {
   const res = rawScoreOutputSchema.safeParse(raw);
@@ -238,12 +264,12 @@ export function validateScoreOutput(
       if (
         c.evidence_strength === 'strong' &&
         ![...dedup].some(
-          (id) => ctx.evidenceKinds.get(id) === 'observation' || ctx.selectedFrameIds.has(id),
+          (id) => ctx.observationGradeIds.has(id) || ctx.selectedFrameIds.has(id),
         )
       ) {
         errors.push({
           code: 'INVALID_EVIDENCE_STATE',
-          message: `criterion '${c.criterion_id}': evidence_strength 'strong' requires at least one cited ev_* with kind 'observation' or a directly cited selected frame_*`,
+          message: `criterion '${c.criterion_id}': evidence_strength 'strong' requires at least one cited ev_* backed by a presented frame (kind 'observation' with >=1 selected frame source) or a directly cited selected frame_*`,
         });
       }
     }
