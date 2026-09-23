@@ -162,18 +162,8 @@ export function aggregateScores(
 
   const uncertainties = [...new Set(samples.flatMap((s) => s.uncertainties))];
 
-  // Summary source: sample with the most non-null levels; ties -> lowest index
-  // (spec default is sample 0; this only diverges when sample 0 has nulls that
-  // a later sample does not).
-  let summaryIdx = 0;
-  let bestCount = -1;
-  samples.forEach((s, i) => {
-    const count = s.criteria.filter((c) => c.level !== null).length;
-    if (count > bestCount) {
-      bestCount = count;
-      summaryIdx = i;
-    }
-  });
+  // §13: summary is taken from sample_index=0 as the representative sample.
+  const summaryIdx = 0;
 
   return {
     criteria,
