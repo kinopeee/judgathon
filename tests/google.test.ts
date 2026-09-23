@@ -141,8 +141,34 @@ describe('google adapter (mocked SDK)', () => {
       { apiKey: 'x' },
     );
     await tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} });
-    expect(fileUpload).toHaveBeenCalledWith({ file: audio, config: { mimeType: 'audio/wav' } });
-    expect(fileDelete).toHaveBeenCalledWith({ name: 'files/abc' });
+    expect(fileUpload).toHaveBeenCalledWith({
+      file: audio,
+      config: { mimeType: 'audio/wav', abortSignal: expect.any(AbortSignal) },
+    });
+    expect(fileGet).toHaveBeenCalledWith({
+      name: 'files/abc',
+      config: { abortSignal: expect.any(AbortSignal) },
+    });
+    expect(fileDelete).toHaveBeenCalledWith({
+      name: 'files/abc',
+      config: { abortSignal: expect.any(AbortSignal) },
+    });
+  });
+
+  it('transcriber times out when files.upload never resolves (120s budget is effective)', async () => {
+    fileUpload.mockImplementation(() => new Promise(() => {}));
+    fileDelete.mockResolvedValue({});
+    const dir = tmpDir('judgathon-g-');
+    const audio = path.join(dir, 'a.wav');
+    await fs.writeFile(audio, 'RIFF');
+    const tr = new GoogleTranscriber(
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
+      { apiKey: 'x', timeoutMs: 50 },
+    );
+    await expect(
+      tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} }),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+    expect(genContent).not.toHaveBeenCalled();
   });
 
   it('extractor guards payload size (>18 MiB inline -> invalid_input)', async () => {

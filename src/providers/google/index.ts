@@ -176,7 +176,18 @@ async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: numb
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fn(controller.signal);
+    // Race so the budget holds even when a callee ignores the signal (the
+    // losing promise keeps running in the background but is dropped here).
+    return await Promise.race([
+      fn(controller.signal),
+      new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new ProviderError('timeout', `request aborted after ${timeoutMs} ms`)),
+          { once: true },
+        );
+      }),
+    ]);
   } catch (err) {
     if (controller.signal.aborted) {
       throw new ProviderError('timeout', `request aborted after ${timeoutMs} ms`);
@@ -275,7 +286,7 @@ export class GoogleTranscriber implements Transcriber {
       return await timed(async (signal) => {
         uploaded = await client.files.upload({
           file: input.audioPath,
-          config: { mimeType: 'audio/wav' },
+          config: { mimeType: 'audio/wav', abortSignal: signal },
         });
         // Poll until ACTIVE (bounded by the shared budget).
         for (let i = 0; i < 120 && uploaded.state !== 'ACTIVE'; i++) {
@@ -283,7 +294,10 @@ export class GoogleTranscriber implements Transcriber {
             throw new ProviderError('invalid_input', 'uploaded audio file failed processing');
           }
           await sleepAbort(1000, signal);
-          uploaded = await client.files.get({ name: uploaded.name! });
+          uploaded = await client.files.get({
+            name: uploaded.name!,
+            config: { abortSignal: signal },
+          });
         }
         if (uploaded.state !== 'ACTIVE') {
           throw new ProviderError('timeout', 'uploaded file not ACTIVE after wait');
@@ -304,7 +318,12 @@ export class GoogleTranscriber implements Transcriber {
       const uploadedName = (uploaded as GenaiFile | null)?.name;
       if (uploadedName) {
         try {
-          await client.files.delete({ name: uploadedName });
+          // Cleanup runs after the attempt ended, so it gets its own bounded
+          // budget rather than the (possibly already-aborted) attempt signal.
+          await client.files.delete({
+            name: uploadedName,
+            config: { abortSignal: AbortSignal.timeout(timeoutMs) },
+          });
         } catch {
           // best-effort cleanup; never mask the real error
         }
