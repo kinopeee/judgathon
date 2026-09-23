@@ -3,6 +3,7 @@ import { Decimal } from 'decimal.js';
 import { levelToScore, normalizedTotal } from '../src/core/scoring.js';
 import { aggregateScores, medianLevel } from '../src/core/aggregation.js';
 import {
+  observationGradeIds,
   validateScoreOutput,
   validateTranscriptOutput,
   validateEvidenceOutput,
@@ -22,9 +23,7 @@ const CTX = {
   evidenceIds: new Set(['ev_x']),
   transcriptIds: new Set(['tr_0']),
   selectedFrameIds: new Set(['frame_sel']),
-  evidenceKinds: new Map<string, 'claim' | 'observation' | 'limitation' | 'uncertainty'>([
-    ['ev_x', 'observation'],
-  ]),
+  observationGradeIds: new Set(['ev_x']),
 };
 
 describe('scoring (§12.2)', () => {
@@ -123,13 +122,42 @@ describe('score output validation (§41.5)', () => {
     const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), {
       ...CTX,
       evidenceIds: new Set(['ev_x', 'ev_claim']),
-      evidenceKinds: new Map([
-        ['ev_x', 'observation' as const],
-        ['ev_claim', 'claim' as const],
-      ]),
+      observationGradeIds: new Set(['ev_x']),
     });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
+  });
+  it('strong citing only an observation ev_* with no presented frame -> INVALID_EVIDENCE_STATE (§41.4.6)', () => {
+    const out = scoreOutput([4, 4]);
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), {
+      ...CTX,
+      // ev_x is kind 'observation' but all its frame sources were thinned out
+      // (frame_reference_overflow), so it is not observation-grade.
+      observationGradeIds: new Set<string>(),
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.errors.some((e) => e.code === 'INVALID_EVIDENCE_STATE')).toBe(true);
+  });
+  it('partial citing only an unshown observation ev_* -> ok (cap, not rejection)', () => {
+    const out = scoreOutput([4, 4]);
+    for (const c of out.criteria) c.evidence_strength = 'partial';
+    const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), {
+      ...CTX,
+      observationGradeIds: new Set<string>(),
+    });
+    expect(res.ok).toBe(true);
+  });
+  it('observationGradeIds counts only observations backed by a presented frame', () => {
+    const ids = observationGradeIds(
+      [
+        { id: 'ev_shown', kind: 'observation', sources: [{ type: 'frame', id: 'frame_sel' }] },
+        { id: 'ev_unshown', kind: 'observation', sources: [{ type: 'frame', id: 'frame_other' }] },
+        { id: 'ev_mixed', kind: 'observation', sources: [{ type: 'transcript', id: 'tr_0' }, { type: 'frame', id: 'frame_sel' }] },
+        { id: 'ev_claim', kind: 'claim', sources: [{ type: 'frame', id: 'frame_sel' }] },
+      ],
+      new Set(['frame_sel']),
+    );
+    expect([...ids].sort()).toEqual(['ev_mixed', 'ev_shown']);
   });
   it('strong citing only tr_* (no ev_*, no frame cite) -> INVALID_EVIDENCE_STATE', () => {
     const out = scoreOutput([4, 4]);
@@ -151,10 +179,7 @@ describe('score output validation (§41.5)', () => {
     const res = validateScoreOutput(JSON.parse(JSON.stringify(out)), {
       ...CTX,
       evidenceIds: new Set(['ev_x', 'ev_claim']),
-      evidenceKinds: new Map([
-        ['ev_x', 'observation' as const],
-        ['ev_claim', 'claim' as const],
-      ]),
+      observationGradeIds: new Set(['ev_x']),
     });
     expect(res.ok).toBe(true);
   });

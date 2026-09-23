@@ -7,6 +7,7 @@ import { normalizeReviewFlags } from '../core/input-hash.js';
 import { writeJsonAtomic, isAbsentOrEmptyDir } from '../core/storage.js';
 import { buildUsageReport, loadPricing, pricingRef } from '../core/usage.js';
 import { FailedAttemptError, type AttemptRecord } from '../core/retry.js';
+import { observationGradeIds } from '../core/reference-validation.js';
 import { runJudgeStage } from './judge-stage.js';
 import { buildJudge } from './providers.js';
 import { loadFrozenBundle } from './repeat-bundle.js';
@@ -175,7 +176,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
             evidenceIds: new Set(evidenceSet.evidence_ids),
             transcriptIds: new Set(bundle.segments.map((s) => s.id)),
             selectedFrameIds: selectedSet,
-            evidenceKinds: new Map(evidenceItems.map((e) => [e.id, e.kind])),
+            observationGradeIds: observationGradeIds(evidenceItems, selectedSet),
           },
           reviewFlagsExtra: normalizeReviewFlags(frozenInputs.review_flags_extra),
           extraInjectionSuspected: evidenceSet.injection_suspected === true,
