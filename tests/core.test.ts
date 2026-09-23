@@ -257,6 +257,15 @@ describe('aggregation (§13)', () => {
     );
     expect(res.review_flags).not.toContain('needs_review');
   });
+  it('summary and representative_sample_index always come from sample_index=0', () => {
+    const res = aggregateScores(TEST_RUBRIC, [
+      scoreOutput([null, null], { summary: 's0' }),
+      scoreOutput([4, 4], { summary: 's1' }),
+      scoreOutput([4, 4], { summary: 's2' }),
+    ]);
+    expect(res.summary).toBe('s0');
+    expect(res.representative_sample_index).toBe(0);
+  });
   it('unstable via 3 distinct valid values [1,2,3]', () => {
     const res = aggregateScores(TEST_RUBRIC, [
       scoreOutput([1, 4]),
