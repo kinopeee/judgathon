@@ -171,6 +171,21 @@ describe('google adapter (mocked SDK)', () => {
     expect(genContent).not.toHaveBeenCalled();
   });
 
+  it('transcriber handles a rejected files.upload without unhandled rejection', async () => {
+    fileUpload.mockRejectedValue(new FakeApiError({ message: 'no', status: 401 }));
+    fileDelete.mockResolvedValue({});
+    const dir = tmpDir('judgathon-g-');
+    const audio = path.join(dir, 'a.wav');
+    await fs.writeFile(audio, 'RIFF');
+    const tr = new GoogleTranscriber(
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
+      { apiKey: 'x', timeoutMs: 50 },
+    );
+    await expect(
+      tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} }),
+    ).rejects.toMatchObject({ kind: 'auth' });
+  });
+
   it('transcriber deletes a file that finishes uploading after the attempt timed out', async () => {
     let resolveUpload!: (f: unknown) => void;
     fileUpload.mockImplementation(() => new Promise((res) => { resolveUpload = res; }));

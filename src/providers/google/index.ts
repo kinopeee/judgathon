@@ -306,11 +306,16 @@ export class GoogleTranscriber implements Transcriber {
         });
         // A callee that ignores the abort can still finish uploading after the
         // attempt ended; delete the late-arriving file so it isn't orphaned.
-        void uploadPromise.then((file) => {
-          if (signal.aborted && file.name != null) {
-            void deleteBestEffort(client, file.name, timeoutMs);
-          }
-        });
+        // The rejection handler keeps a failed upload from surfacing as an
+        // unhandled rejection here (the awaited path already reports it).
+        void uploadPromise.then(
+          (file) => {
+            if (signal.aborted && file.name != null) {
+              void deleteBestEffort(client, file.name, timeoutMs);
+            }
+          },
+          () => {},
+        );
         uploaded = await uploadPromise;
         signal.throwIfAborted();
         // Poll until ACTIVE (bounded by the shared budget).
