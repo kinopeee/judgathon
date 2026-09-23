@@ -164,12 +164,28 @@ function effectiveSettings(entry: ProviderEntry, promptText: string): Record<str
 
 function sleepAbort(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    const fail = () => reject(new ProviderError('timeout', `request aborted (budget exceeded)`));
+    if (signal.aborted) {
+      fail();
+      return;
+    }
     const t = setTimeout(resolve, ms);
     signal.addEventListener('abort', () => {
       clearTimeout(t);
-      reject(new ProviderError('timeout', `request aborted (budget exceeded)`));
+      fail();
     }, { once: true });
   });
+}
+
+function deleteBestEffort(
+  client: Pick<GoogleGenAI, 'files'>,
+  name: string,
+  timeoutMs: number,
+): Promise<void> {
+  return client.files
+    .delete({ name, config: { abortSignal: AbortSignal.timeout(timeoutMs) } })
+    .then(() => undefined)
+    .catch(() => {});
 }
 
 async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
@@ -284,10 +300,19 @@ export class GoogleTranscriber implements Transcriber {
       // Upload + poll + generate share a single attempt budget so the whole
       // call can never exceed timeoutMs.
       return await timed(async (signal) => {
-        uploaded = await client.files.upload({
+        const uploadPromise = client.files.upload({
           file: input.audioPath,
           config: { mimeType: 'audio/wav', abortSignal: signal },
         });
+        // A callee that ignores the abort can still finish uploading after the
+        // attempt ended; delete the late-arriving file so it isn't orphaned.
+        void uploadPromise.then((file) => {
+          if (signal.aborted && file.name != null) {
+            void deleteBestEffort(client, file.name, timeoutMs);
+          }
+        });
+        uploaded = await uploadPromise;
+        signal.throwIfAborted();
         // Poll until ACTIVE (bounded by the shared budget).
         for (let i = 0; i < 120 && uploaded.state !== 'ACTIVE'; i++) {
           if (uploaded.state === 'FAILED') {
@@ -298,6 +323,7 @@ export class GoogleTranscriber implements Transcriber {
             name: uploaded.name!,
             config: { abortSignal: signal },
           });
+          signal.throwIfAborted();
         }
         if (uploaded.state !== 'ACTIVE') {
           throw new ProviderError('timeout', 'uploaded file not ACTIVE after wait');
@@ -317,16 +343,9 @@ export class GoogleTranscriber implements Transcriber {
     } finally {
       const uploadedName = (uploaded as GenaiFile | null)?.name;
       if (uploadedName) {
-        try {
-          // Cleanup runs after the attempt ended, so it gets its own bounded
-          // budget rather than the (possibly already-aborted) attempt signal.
-          await client.files.delete({
-            name: uploadedName,
-            config: { abortSignal: AbortSignal.timeout(timeoutMs) },
-          });
-        } catch {
-          // best-effort cleanup; never mask the real error
-        }
+        // Detached cleanup with its own bounded budget: a stuck delete can
+        // never push the observed attempt latency past timeoutMs.
+        void deleteBestEffort(client, uploadedName, timeoutMs);
       }
     }
   }
