@@ -164,19 +164,46 @@ function effectiveSettings(entry: ProviderEntry, promptText: string): Record<str
 
 function sleepAbort(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    const fail = () => reject(new ProviderError('timeout', `request aborted (budget exceeded)`));
+    if (signal.aborted) {
+      fail();
+      return;
+    }
     const t = setTimeout(resolve, ms);
     signal.addEventListener('abort', () => {
       clearTimeout(t);
-      reject(new ProviderError('timeout', `request aborted (budget exceeded)`));
+      fail();
     }, { once: true });
   });
+}
+
+function deleteBestEffort(
+  client: Pick<GoogleGenAI, 'files'>,
+  name: string,
+  timeoutMs: number,
+): Promise<void> {
+  return client.files
+    .delete({ name, config: { abortSignal: AbortSignal.timeout(timeoutMs) } })
+    .then(() => undefined)
+    .catch(() => {});
 }
 
 async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fn(controller.signal);
+    // Race so the budget holds even when a callee ignores the signal (the
+    // losing promise keeps running in the background but is dropped here).
+    return await Promise.race([
+      fn(controller.signal),
+      new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new ProviderError('timeout', `request aborted after ${timeoutMs} ms`)),
+          { once: true },
+        );
+      }),
+    ]);
   } catch (err) {
     if (controller.signal.aborted) {
       throw new ProviderError('timeout', `request aborted after ${timeoutMs} ms`);
@@ -273,17 +300,35 @@ export class GoogleTranscriber implements Transcriber {
       // Upload + poll + generate share a single attempt budget so the whole
       // call can never exceed timeoutMs.
       return await timed(async (signal) => {
-        uploaded = await client.files.upload({
+        const uploadPromise = client.files.upload({
           file: input.audioPath,
-          config: { mimeType: 'audio/wav' },
+          config: { mimeType: 'audio/wav', abortSignal: signal },
         });
+        // A callee that ignores the abort can still finish uploading after the
+        // attempt ended; delete the late-arriving file so it isn't orphaned.
+        // The rejection handler keeps a failed upload from surfacing as an
+        // unhandled rejection here (the awaited path already reports it).
+        void uploadPromise.then(
+          (file) => {
+            if (signal.aborted && file.name != null) {
+              void deleteBestEffort(client, file.name, timeoutMs);
+            }
+          },
+          () => {},
+        );
+        uploaded = await uploadPromise;
+        signal.throwIfAborted();
         // Poll until ACTIVE (bounded by the shared budget).
         for (let i = 0; i < 120 && uploaded.state !== 'ACTIVE'; i++) {
           if (uploaded.state === 'FAILED') {
             throw new ProviderError('invalid_input', 'uploaded audio file failed processing');
           }
           await sleepAbort(1000, signal);
-          uploaded = await client.files.get({ name: uploaded.name! });
+          uploaded = await client.files.get({
+            name: uploaded.name!,
+            config: { abortSignal: signal },
+          });
+          signal.throwIfAborted();
         }
         if (uploaded.state !== 'ACTIVE') {
           throw new ProviderError('timeout', 'uploaded file not ACTIVE after wait');
@@ -303,11 +348,9 @@ export class GoogleTranscriber implements Transcriber {
     } finally {
       const uploadedName = (uploaded as GenaiFile | null)?.name;
       if (uploadedName) {
-        try {
-          await client.files.delete({ name: uploadedName });
-        } catch {
-          // best-effort cleanup; never mask the real error
-        }
+        // Detached cleanup with its own bounded budget: a stuck delete can
+        // never push the observed attempt latency past timeoutMs.
+        void deleteBestEffort(client, uploadedName, timeoutMs);
       }
     }
   }

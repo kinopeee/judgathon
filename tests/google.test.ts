@@ -141,8 +141,93 @@ describe('google adapter (mocked SDK)', () => {
       { apiKey: 'x' },
     );
     await tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} });
-    expect(fileUpload).toHaveBeenCalledWith({ file: audio, config: { mimeType: 'audio/wav' } });
-    expect(fileDelete).toHaveBeenCalledWith({ name: 'files/abc' });
+    expect(fileUpload).toHaveBeenCalledWith({
+      file: audio,
+      config: { mimeType: 'audio/wav', abortSignal: expect.any(AbortSignal) },
+    });
+    expect(fileGet).toHaveBeenCalledWith({
+      name: 'files/abc',
+      config: { abortSignal: expect.any(AbortSignal) },
+    });
+    expect(fileDelete).toHaveBeenCalledWith({
+      name: 'files/abc',
+      config: { abortSignal: expect.any(AbortSignal) },
+    });
+  });
+
+  it('transcriber times out when files.upload never resolves (120s budget is effective)', async () => {
+    fileUpload.mockImplementation(() => new Promise(() => {}));
+    fileDelete.mockResolvedValue({});
+    const dir = tmpDir('judgathon-g-');
+    const audio = path.join(dir, 'a.wav');
+    await fs.writeFile(audio, 'RIFF');
+    const tr = new GoogleTranscriber(
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
+      { apiKey: 'x', timeoutMs: 50 },
+    );
+    await expect(
+      tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} }),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+    expect(genContent).not.toHaveBeenCalled();
+  });
+
+  it('transcriber handles a rejected files.upload without unhandled rejection', async () => {
+    fileUpload.mockRejectedValue(new FakeApiError({ message: 'no', status: 401 }));
+    fileDelete.mockResolvedValue({});
+    const dir = tmpDir('judgathon-g-');
+    const audio = path.join(dir, 'a.wav');
+    await fs.writeFile(audio, 'RIFF');
+    const tr = new GoogleTranscriber(
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
+      { apiKey: 'x', timeoutMs: 50 },
+    );
+    await expect(
+      tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} }),
+    ).rejects.toMatchObject({ kind: 'auth' });
+  });
+
+  it('transcriber deletes a file that finishes uploading after the attempt timed out', async () => {
+    let resolveUpload!: (f: unknown) => void;
+    fileUpload.mockImplementation(() => new Promise((res) => { resolveUpload = res; }));
+    fileDelete.mockResolvedValue({});
+    const dir = tmpDir('judgathon-g-');
+    const audio = path.join(dir, 'a.wav');
+    await fs.writeFile(audio, 'RIFF');
+    const tr = new GoogleTranscriber(
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
+      { apiKey: 'x', timeoutMs: 50 },
+    );
+    await expect(
+      tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} }),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+    // The signal-ignoring upload resolves after the attempt already ended.
+    resolveUpload({ name: 'files/abc', state: 'ACTIVE', uri: 'gs://x' });
+    await vi.waitFor(() => {
+      expect(fileDelete).toHaveBeenCalledWith({
+        name: 'files/abc',
+        config: { abortSignal: expect.any(AbortSignal) },
+      });
+    });
+  });
+
+  it('transcriber does not wait for a stuck files.delete (attempt latency stays within budget)', async () => {
+    fileUpload.mockResolvedValue({ name: 'files/abc', state: 'ACTIVE', uri: 'gs://x' });
+    fileDelete.mockImplementation(() => new Promise(() => {}));
+    genContent.mockResolvedValue(fakeResponse({ language: 'en', segments: [] }));
+    const dir = tmpDir('judgathon-g-');
+    const audio = path.join(dir, 'a.wav');
+    await fs.writeFile(audio, 'RIFF');
+    const tr = new GoogleTranscriber(
+      { provider: 'google', model: 'm', prompt_version: 'transcribe-v2' },
+      { apiKey: 'x', timeoutMs: 500 },
+    );
+    await expect(
+      tr.transcribe({ audioPath: audio, durationMs: 1000, promptText: 'p', schema: {} }),
+    ).resolves.toBeDefined();
+    expect(fileDelete).toHaveBeenCalledWith({
+      name: 'files/abc',
+      config: { abortSignal: expect.any(AbortSignal) },
+    });
   });
 
   it('extractor guards payload size (>18 MiB inline -> invalid_input)', async () => {
