@@ -152,6 +152,11 @@ schemas, a 120 s per-attempt timeout, and the Files API for audio upload.
 `usage.json`, `evidence-audit.json`. All JSON is snake_case, `schema_version: 1`,
 atomic writes via tmp+rename.
 
+`evidence-audit.json` records `selected_ids`, `total` (number of evidence
+items the sample is drawn from), `status` (`na` when `total` is 0, otherwise
+`pending_human_review`) and `reference_only` (§41.6: `true` when
+`1 <= total <= 29`, i.e. the audit result is reference-only; `false` otherwise).
+
 `manifest.json` also records:
 
 - `segments`: `[{ "segment": "pitch", "start_ms": 0, "end_ms": <duration_ms> }]`
