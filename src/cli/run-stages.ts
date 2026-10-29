@@ -71,6 +71,12 @@ export interface ManifestFrame {
   source: string;
 }
 
+export interface PromptSnapshot {
+  path: string;
+  version: string;
+  sha256: string;
+}
+
 /** manifest.json as `run` writes it — mutable, written without a Zod round-trip. */
 export interface RunManifest {
   schema_version: number;
@@ -89,6 +95,7 @@ export interface RunManifest {
     format_name: string;
   };
   video_track?: boolean;
+  segments?: Array<{ segment: 'pitch'; start_ms: number; end_ms: number }>;
   media?: {
     audio: { path: string; mime: string; byte_size: number; sha256: string };
     frames: ManifestFrame[];
@@ -102,6 +109,7 @@ export interface RunManifest {
     ffprobe_version: string;
   };
   frozen_inputs?: FrozenInputsV2;
+  prompts?: Record<'transcriber' | 'evidence_extractor' | 'judge', PromptSnapshot>;
   judge_input_mask?: { enabled: true; replacements: Record<string, string> };
   artifacts?: {
     transcript: string;
@@ -226,6 +234,7 @@ export async function prepareMedia(ctx: RunContext): Promise<MediaStageResult> {
     duration_ms: durationMs,
     format_name: media.probe.formatName,
   };
+  manifest.segments = [{ segment: 'pitch', start_ms: 0, end_ms: durationMs }];
   manifest.video_track = media.hasVideo;
   manifest.media = {
     audio: {
@@ -496,31 +505,33 @@ export async function freezeInputs(
   for (const [role, p] of Object.entries(prompts)) {
     await writeTextAtomic(path.join(promptsOutDir, role, `${p.version}.md`), p.text);
   }
+  const promptSnapshots: Record<'transcriber' | 'evidence_extractor' | 'judge', PromptSnapshot> = {
+    transcriber: {
+      path: `prompts/transcriber/${prompts.transcriber.version}.md`,
+      version: prompts.transcriber.version,
+      sha256: prompts.transcriber.sha256,
+    },
+    evidence_extractor: {
+      path: `prompts/evidence_extractor/${prompts.evidence_extractor.version}.md`,
+      version: prompts.evidence_extractor.version,
+      sha256: prompts.evidence_extractor.sha256,
+    },
+    judge: {
+      path: `prompts/judge/${prompts.judge.version}.md`,
+      version: prompts.judge.version,
+      sha256: prompts.judge.sha256,
+    },
+  };
   const configSnapshot = storedConfigSnapshotSchema.parse({
     schema_version: 1,
     config_id: config.id,
     config_sha256: ctx.configSha,
     effective: {
       ...config,
+      output_language: ctx.outputLanguage,
       phash: { implementation: PHASH_IMPLEMENTATION },
       sampling: { fps: 1, max_long_edge: 1280, format: 'jpeg' },
-      prompts: {
-        transcriber: {
-          path: `prompts/transcriber/${prompts.transcriber.version}.md`,
-          version: prompts.transcriber.version,
-          sha256: prompts.transcriber.sha256,
-        },
-        evidence_extractor: {
-          path: `prompts/evidence_extractor/${prompts.evidence_extractor.version}.md`,
-          version: prompts.evidence_extractor.version,
-          sha256: prompts.evidence_extractor.sha256,
-        },
-        judge: {
-          path: `prompts/judge/${prompts.judge.version}.md`,
-          version: prompts.judge.version,
-          sha256: prompts.judge.sha256,
-        },
-      },
+      prompts: promptSnapshots,
       provider_mode: ctx.providers.mode,
     },
   });
@@ -561,6 +572,7 @@ export async function freezeInputs(
   const inputHash = computeInputHash(frozenInputsWithoutHash);
   const frozenInputs = frozenInputsV2Schema.parse({ ...frozenInputsWithoutHash, input_hash: inputHash });
   manifest.frozen_inputs = frozenInputs;
+  manifest.prompts = promptSnapshots;
   const evidenceForPrompt = buildEvidenceForPrompt(evidence.evidenceItems, evidence.selection.unshown_source_ids);
   let judgeSegments = transcript.segments;
   let judgeEvidence = evidenceForPrompt;
