@@ -71,6 +71,7 @@ export interface UsageAttemptEntry {
   attempt_index: number;
   operation: string;
   sample_index: number | null;
+  model: string;
   started_at: string;
   latency_ms: number;
   status: AttemptRecord['status'];
@@ -101,7 +102,6 @@ export function buildUsageReport(
   table: PricingTable | null,
 ): UsageReport {
   const model = opts.model;
-  const pricingModel = table?.models[model];
 
   let input = new Decimal(0);
   let output = new Decimal(0);
@@ -117,7 +117,10 @@ export function buildUsageReport(
 
   const attemptEntries: UsageAttemptEntry[] = opts.attempts.map((a) => {
     const u: Usage | null = a.usage;
-    const cost = estimateUsd(u, pricingModel);
+    // Price each attempt with the model that actually served it; `opts.model`
+    // is only a fallback for records that predate per-attempt models.
+    const attemptModel = a.model ?? model;
+    const cost = estimateUsd(u, table?.models[attemptModel]);
     if (u === null || cost === null) {
       costUnknown = true;
       unknownAttempts += 1;
@@ -134,6 +137,7 @@ export function buildUsageReport(
       attempt_index: a.attempt_index,
       operation: a.operation,
       sample_index: a.sample_index,
+      model: attemptModel,
       started_at: a.started_at,
       latency_ms: a.latency_ms,
       status: a.status,

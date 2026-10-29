@@ -54,7 +54,8 @@ transcript / evidence-set / selected frames of a completed run, then writes
 
 `repeat` flags: `--from` / `--out` / `--provider-mode fixture|live` are
 required (no default); `--times` must be `5` in Phase 0 (otherwise
-`INVALID_ARGS`); `--fixture-dir` (default `fixtures/default`),
+`INVALID_ARGS`); `--fixture-dir` (fixture mode only, default
+`fixtures/default`; with `--provider-mode live` it is `INVALID_ARGS`),
 `--prompts-dir` (default `prompts`), `--pricing` (default
 `configs/pricing.json`).
 Runs are frozen with `frozen_inputs.hash_version: 2`; older runs are rejected
@@ -141,7 +142,7 @@ schemas, a 120 s per-attempt timeout, and the Files API for audio upload.
 | 2 | input / config / schema-invalid (INVALID_ARGS, INVALID_MEDIA, INVALID_LANGUAGE, CONFIG_INVALID, RUBRIC_INVALID, CONFIG_LANGUAGE_CONFLICT, INPUT_INVALID, OUTPUT_DIR_NOT_EMPTY, PROVIDER_MODE_MISMATCH, INPUT_HASH_MISMATCH, UNSUPPORTED_FROZEN_INPUT_VERSION, FIXTURE_NOT_FOUND, FIXTURE_INVALID) |
 | 3 | external dependency / provider / media-processing / internal failure (FFMPEG_NOT_FOUND, FFMPEG_FAILED, MISSING_CREDENTIALS, PROVIDER_*, DEADLINE_EXCEEDED, INTERNAL_ERROR) |
 | 4 | repeat quality evaluation failed (σ > 0.5) |
-| 5 | insufficient data to evaluate (NO_TRANSCRIPT, repeat not_evaluated) |
+| 5 | insufficient data to evaluate (NO_TRANSCRIPT — zero segments or every segment blank after trim, repeat not_evaluated) |
 
 ## Output layout
 
@@ -150,6 +151,23 @@ schemas, a 120 s per-attempt timeout, and the Files API for audio upload.
 `evidence-set.json`, `judge-run.json`, `attempts/`, `scorecard.json`,
 `usage.json`, `evidence-audit.json`. All JSON is snake_case, `schema_version: 1`,
 atomic writes via tmp+rename.
+
+`manifest.json` also records:
+
+- `segments`: `[{ "segment": "pitch", "start_ms": 0, "end_ms": <duration_ms> }]`
+  — Phase 0 treats the whole recording as a single pitch segment.
+- `prompts`: `{ transcriber, evidence_extractor, judge }`, each
+  `{ path, version, sha256 }`. `path` is the prompt copy inside the run
+  directory (`prompts/<role>/<version>.md`); `sha256` is the hash of the
+  substituted prompt text and equals `frozen_inputs.prompt_hashes` and
+  `config.snapshot.json` `effective.prompts`.
+
+`usage.json` attempts each record the `model` that served them, and
+`estimated_usd` is priced with that model; totals are the sum of attempts.
+`rubric_version_id` is `<rubric.id>:<first 16 hex of rubric SHA-256>` in
+`scorecard.json`, `evidence-set.json` and `rubric.snapshot.json`.
+On failure, the stdout error JSON carries `run_id` once the output directory
+and run manifest have been created; earlier failures report `run_id: null`.
 
 ## Non-goals (Phase 0)
 

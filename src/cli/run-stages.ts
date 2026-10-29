@@ -8,6 +8,7 @@ import {
   newMediaId,
   newTranscriptSegmentId,
   newTranscriptVersionId,
+  rubricVersionId,
 } from '../core/ids.js';
 import type { JudgeConfig } from '../core/schemas/config.js';
 import type { Rubric } from '../core/schemas/rubric.js';
@@ -277,6 +278,7 @@ export async function transcribe(
   const transcriptRes = await callWithAttempts<TranscriptOutput>(
     {
       operation: 'transcript',
+      model: config.transcriber.model,
       sampleIndex: null,
       maxAttempts: MAX_ATTEMPTS,
       sleep,
@@ -372,6 +374,7 @@ export async function extractEvidence(
   const evRes = await callWithAttempts<EvidenceOutput>(
     {
       operation: 'evidence',
+      model: config.evidence_extractor.model,
       sampleIndex: null,
       maxAttempts: MAX_ATTEMPTS,
       sleep,
@@ -460,7 +463,7 @@ export async function extractEvidence(
     recorded_media_id: transcript.recordedMediaId,
     transcript_version_id: transcript.transcriptVersionId,
     config_version_id: config.id,
-    rubric_version_id: `${rubric.id}:${ctx.rubricSha.slice(0, 16)}`,
+    rubric_version_id: rubricVersionId(rubric.id, ctx.rubricSha),
     input_frame_ids: selection.input_frame_ids,
     selected_frame_ids: selection.selected_frame_ids,
     frame_reference_overflow: selection.frame_reference_overflow,
@@ -537,7 +540,7 @@ export async function freezeInputs(
   });
   const rubricSnapshot = storedRubricSnapshotSchema.parse({
     schema_version: 1,
-    rubric_version_id: `${rubric.id}:${ctx.rubricSha.slice(0, 16)}`,
+    rubric_version_id: rubricVersionId(rubric.id, ctx.rubricSha),
     rubric_sha256: ctx.rubricSha,
     rubric,
   });

@@ -165,6 +165,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           judgeEntry,
           prompt: bundle.judgePrompt,
           rubric,
+          rubricVersionId: bundle.rubricVersionId,
           evidenceForPrompt: bundle.judgeEvidence,
           transcriptSegments: bundle.judgeSegments,
           selectedFrames: bundle.selectedFrames.map((f) => ({
