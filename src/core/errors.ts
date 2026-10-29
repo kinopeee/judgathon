@@ -5,6 +5,8 @@ export class CliError extends Error {
   readonly code: string;
   readonly exitCode: ExitCode;
   readonly stage: string;
+  /** run_id of the run this failure belongs to, once it has been issued. */
+  runId: string | null = null;
 
   constructor(code: string, message: string, exitCode: ExitCode, stage: string) {
     super(message);

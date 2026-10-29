@@ -847,28 +847,63 @@ LLM出力を検証・換算した結果を `ScoreCard` として保存する。
 
 ```json
 {
-  "id": "sc_0042",
+  "schema_version": 1,
   "judge_run_id": "jr_0042",
-  "judge_id": "openai-main",
+  "judge_id": "gemini",
   "pitch_id": "pitch_008",
+  "run_id": "run_008",
   "evidence_set_id": "evs_008_v1",
-  "rubric_version_id": "hackathon-2026-v3",
+  "rubric_version_id": "hackathon-2026-v3:a2c76eeff4108699",
   "criteria": [
     {
       "criterion_id": "technical_execution",
-      "level": 4,
-      "score": 18.75,
-      "max_score": 25,
-      "evidence_strength": "strong",
-      "reason": "...",
-      "evidence_ids": ["ev_021", "ev_031", "tr_118", "frame_0093"]
+      "aggregated_level": "4",
+      "score": "18.75",
+      "display_score": "18.75",
+      "max_score": "25",
+      "representative": {
+        "sample_index": 0,
+        "level": 4,
+        "evidence_strength": "strong",
+        "evidence_ids": ["ev_021", "ev_031", "tr_118", "frame_0093"],
+        "reason": "..."
+      },
+      "flags": {
+        "sample_insufficient": false,
+        "unstable": false,
+        "insufficient_for_all": false,
+        "needs_review": false
+      },
+      "samples": [
+        { "sample_index": 0, "criterion_id": "technical_execution", "level": 4, "evidence_strength": "strong", "evidence_ids": ["ev_021"], "reason": "..." },
+        { "sample_index": 1, "criterion_id": "technical_execution", "level": 4, "evidence_strength": "strong", "evidence_ids": ["ev_031"], "reason": "..." },
+        { "sample_index": 2, "criterion_id": "technical_execution", "level": 3, "evidence_strength": "partial", "evidence_ids": ["tr_118"], "reason": "..." }
+      ]
     }
   ],
-  "total_score": 71.25,
+  "total_score": "71.25",
+  "display_total_score": "71.25",
+  "normalized_total_score": "71.25",
+  "display_normalized_total_score": "71.25",
+  "max_total": "100",
+  "summary": "...",
+  "uncertainties": ["..."],
+  "injection_suspected": false,
+  "review_flags": [],
   "insufficient_criteria": ["feasibility"],
-  "samples": 3
+  "representative_sample_index": 0,
+  "samples": [
+    { "criteria": [ /* RawScoreOutput sample 0（全Criterion） */ ], "summary": "...", "uncertainties": [], "injection_suspected": false },
+    { "criteria": [ /* sample 1 */ ], "summary": "...", "uncertainties": [], "injection_suspected": false },
+    { "criteria": [ /* sample 2 */ ], "summary": "...", "uncertainties": [], "injection_suspected": false }
+  ]
 }
 ```
+
+- 集約後のlevelは `aggregated_level`（中央値、文字列）として保存し、モデル出力の `level` とは区別する。モデル出力そのものは `representative` と `samples` に入れ子で保持する
+- `samples` はサンプル数ではなく、検証済みの全サンプル（N=3）の配列として保存する
+- `rubric_version_id` は全成果物（scorecard / evidence-set / rubric.snapshot）で共通の `<rubric.id>:<Rubric SHA-256先頭16桁>` 形式とする
+- score系の数値はDecimal演算結果の文字列として保存する
 
 ### Self-consistency（複数サンプリング）
 
@@ -2541,7 +2576,7 @@ pnpm exec judgathon repeat --from ./out/team_alpha --times 5 --provider-mode fix
 - `manifest.json`: run_id、pitch_id、元ファイルSHA-256、duration_ms、mediaの相対path / MIME / byte_size / SHA-256、segment区間、全Frameのmetadata、使用したffmpeg versionと引数、status。
 - `config.snapshot.json` / `rubric.snapshot.json`: 秘密を除いた実効Config、Version ID、内容SHA-256。Prompt本文は`prompts/<role>/`（`transcriber` / `evidence_extractor` / `judge`）にコピーし、path / version / SHA-256をmanifestに残す。
 - `media/audio.wav` / `media/frames/`: 正規化した音声と抽出画像。音声とFrameの原点を揃え、`0 <= start_ms < end_ms <= duration_ms`、`0 <= timestamp_ms < duration_ms`を検証する。
-- `transcript.json`: TranscriptVersion IDとsegments。Providerがtimestampを返せない・範囲を逸脱する場合は推測値で通さず検証失敗とする。標準Configはjudge-google-v2で、transcribe-v2の`confidence`はnullのみ（省略も可）を受理し、numeric/stringは検証失敗とする。保存する`asr_confidence`は常にnullで、意味の通る文字起こしが空の場合は採点へ進めずNO_TRANSCRIPTとする。
+- `transcript.json`: TranscriptVersion IDとsegments。Providerがtimestampを返せない・範囲を逸脱する場合は推測値で通さず検証失敗とする。標準Configはjudge-google-v2で、transcribe-v2の`confidence`はnullのみ（省略も可）を受理し、numeric/stringは検証失敗とする。保存する`asr_confidence`は常にnullで、意味の通る文字起こしが空の場合（segment 0件、または全segmentのtextがtrim後に空）は採点へ進めずNO_TRANSCRIPTとする。
 - `evidence-set.json`: §11に加えて、recorded_media_id、input_frame_ids、selected_frame_ids、config / rubric / transcriptのVersion ID、Prompt hash、injection_suspectedとそのsource_refsを保存する。空Evidenceは許可するが空Transcriptとは区別する。
 - `judge-run.json`: phase=provisional、3つのsample_indexと各試行、実効モデル設定、status、input hash。`attempts/`にはProviderの出力本文と検証エラーを保存し、Authorization headerなど通信資格情報は保存しない。
 - `scorecard.json`: §13のシステム保存形式に加え、全検証済みサンプル、representative_sample_index、review_flags、normalized_total_scoreを保持する。

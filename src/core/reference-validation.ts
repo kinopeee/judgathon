@@ -38,6 +38,9 @@ export function validateTranscriptOutput(
   if (!res.success) return { ok: false, errors: zodIssues(res.error) };
   const errors: ValidationIssue[] = [];
   let prevEnd = -1;
+  // All-blank output is "no intelligible transcript" (NO_TRANSCRIPT, exit 5),
+  // handled by the transcript stage exactly like zero segments.
+  const allBlank = res.data.segments.every((seg) => seg.text.trim().length === 0);
   res.data.segments.forEach((seg, i) => {
     if (seg.start_ms < 0) {
       errors.push({ code: 'PROVIDER_OUTPUT_INVALID', message: `segments[${i}].start_ms < 0` });
@@ -60,7 +63,7 @@ export function validateTranscriptOutput(
         message: `segments[${i}] overlaps or is out of order`,
       });
     }
-    if (seg.text.trim().length === 0) {
+    if (!allBlank && seg.text.trim().length === 0) {
       errors.push({ code: 'PROVIDER_OUTPUT_INVALID', message: `segments[${i}].text is blank` });
     }
     prevEnd = Math.max(prevEnd, seg.end_ms);

@@ -417,7 +417,8 @@ describe('frozen inputs v2', () => {
         expected.frames.map(({ frameId, timestampMs }) => ({ frameId, timestampMs })),
       );
       for (let j = 0; j < actual.frames.length; j++) {
-        expect(await fs.readFile(actual.frames[j]!.path)).toEqual(await fs.readFile(expected.frames[j]!.path));
+        const actualBytes = await fs.readFile(actual.frames[j]!.path);
+        expect(actualBytes.equals(await fs.readFile(expected.frames[j]!.path))).toBe(true);
       }
     }
     scoreSpy.mockRestore();

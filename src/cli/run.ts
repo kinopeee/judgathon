@@ -2,7 +2,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { CliError } from '../core/errors.js';
-import { newJudgeRunId, newPitchId, newRunId } from '../core/ids.js';
+import { newJudgeRunId, newPitchId, newRunId, rubricVersionId } from '../core/ids.js';
 import { validateConfig, type JudgeConfig } from '../core/schemas/config.js';
 import { validateRubric, type Rubric } from '../core/schemas/rubric.js';
 import { FailedAttemptError, type AttemptRecord } from '../core/retry.js';
@@ -204,6 +204,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
     manifest.stage = stage;
     manifest.error = { code: err.code, message: err.message };
     delete manifest.completed_at;
+    err.runId = runId;
     try {
       await writeJsonAtomic(manifestPath, manifest);
     } catch {
@@ -264,6 +265,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
       judgeEntry: config.judges[0]!,
       prompt: prompts.judge,
       rubric,
+      rubricVersionId: rubricVersionId(rubric.id, rubricSha),
       evidenceForPrompt: frozen.judgeEvidence,
       transcriptSegments: frozen.judgeSegments,
       selectedFrames: evidence.selectedFrames.map((f) => ({

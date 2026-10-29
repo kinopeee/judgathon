@@ -132,6 +132,9 @@ async function main(): Promise<number> {
       if (v['provider-mode'] !== 'fixture' && v['provider-mode'] !== 'live') {
         throw new CliError('INVALID_ARGS', '--provider-mode is required (fixture|live)', 2, 'validate_input');
       }
+      if (v['provider-mode'] === 'live' && v['fixture-dir'] !== 'fixtures/default') {
+        throw new CliError('INVALID_ARGS', `--fixture-dir is only valid with --provider-mode fixture`, 2, 'validate_input');
+      }
       const res = await cmdRepeat({
         fromDir: path.resolve(v['from']),
         times,
@@ -167,7 +170,7 @@ async function main(): Promise<number> {
       : undefined);
     process.stdout.write(
       JSON.stringify({
-        run_id: null,
+        run_id: cliErr.runId,
         status: 'failed',
         out: outDir ?? null,
         stage: cliErr.stage,

@@ -20,12 +20,16 @@ export interface AttemptRecord {
   validation_errors: string[];
   raw_output_path: string | null;
   usage: Usage | null;
+  /** Model that served this attempt (drives per-attempt cost in usage.json). */
+  model?: string;
   /** true when a timeout may have left provider-side processing running */
   possible_double_billing?: boolean;
 }
 
 export interface AttemptContext {
   operation: string;
+  /** Model used for this operation; copied onto every AttemptRecord. */
+  model?: string;
   sampleIndex: number | null;
   maxAttempts: number;
   sleep: (ms: number) => Promise<void>;
@@ -139,6 +143,7 @@ export async function callWithAttempts<T>(
           raw_output_path: null,
           usage: result.usage,
         };
+        if (ctx.model !== undefined) record.model = ctx.model;
         attempts.push(record);
         record.raw_output_path = await saveAttempt({
           operation: ctx.operation,
@@ -168,6 +173,7 @@ export async function callWithAttempts<T>(
         raw_output_path: null,
         usage: result.usage,
       };
+      if (ctx.model !== undefined) record.model = ctx.model;
       attempts.push(record);
       record.raw_output_path = await saveAttempt({
         operation: ctx.operation,
@@ -207,6 +213,7 @@ export async function callWithAttempts<T>(
         usage: null,
       };
       if (isTimeout) record.possible_double_billing = true;
+      if (ctx.model !== undefined) record.model = ctx.model;
       attempts.push(record);
       record.raw_output_path = await saveAttempt({
         operation: ctx.operation,

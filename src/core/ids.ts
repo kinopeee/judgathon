@@ -19,6 +19,11 @@ export function newId(prefix: IdPrefix): string {
   return `${prefix}${randomUUID().replace(/-/g, '').slice(0, 24)}`;
 }
 
+/** Rubric Version ID shared by every artifact of a run: `<rubric.id>:<sha256[0:16]>`. */
+export function rubricVersionId(rubricId: string, rubricSha256: string): string {
+  return `${rubricId}:${rubricSha256.slice(0, 16)}`;
+}
+
 export function newRunId(): string {
   return newId('run_');
 }

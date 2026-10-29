@@ -98,6 +98,7 @@ export async function runJudgeStage(opts: {
   judgeEntry: JudgeConfig['judges'][number];
   prompt: PromptRef;
   rubric: Rubric;
+  rubricVersionId: string;
   evidenceForPrompt: unknown;
   transcriptSegments: TranscriptSegment[];
   selectedFrames: Array<{ frame_id: string; timestamp_ms: number; path: string }>;
@@ -131,6 +132,7 @@ export async function runJudgeStage(opts: {
       res = await callWithAttempts<RawScoreOutput>(
       {
         operation: 'judge',
+        model: opts.judgeEntry.model,
         sampleIndex,
         maxAttempts: MAX_ATTEMPTS,
         sleep,
@@ -228,7 +230,7 @@ export async function runJudgeStage(opts: {
     pitch_id: opts.pitchId,
     run_id: opts.runId,
     evidence_set_id: opts.evidenceSetId,
-    rubric_version_id: opts.rubric.id,
+    rubric_version_id: opts.rubricVersionId,
     ...score,
     samples: score.samples,
   };

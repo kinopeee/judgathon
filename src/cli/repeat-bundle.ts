@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { CliError } from '../core/errors.js';
+import { rubricVersionId } from '../core/ids.js';
 import { computeInputHash, judgeSchemaSha256 } from '../core/input-hash.js';
 import { readJsonFile, sha256File, sha256Hex } from '../core/storage.js';
 import type { JudgeConfig, JudgeEntry } from '../core/schemas/config.js';
@@ -155,6 +156,8 @@ export interface FrozenBundle {
   config: JudgeConfig;
   judgeEntry: JudgeEntry;
   rubric: Rubric;
+  /** `rubricVersionId(rubric.id, rubric_sha256)` — identical to the source run. */
+  rubricVersionId: string;
   segments: TranscriptSegment[];
   evidenceSet: StoredEvidenceSet;
   /** manifest.media.frames entries for the frozen selected frames, in order. */
@@ -450,6 +453,7 @@ export async function loadFrozenBundle(
     config,
     judgeEntry,
     rubric,
+    rubricVersionId: rubricVersionId(rubric.id, rubricSnap.rubric_sha256),
     segments,
     evidenceSet,
     selectedFrames: selectedMeta,
