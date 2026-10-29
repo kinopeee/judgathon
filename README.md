@@ -38,21 +38,32 @@ pnpm exec judgathon repeat \
   --out ./out/team_alpha_repeat
 ```
 
-`run` flags: `--video-source screen|camera` (default screen), `--fixture-dir`
+`run` flags: `--video` / `--rubric` / `--config` / `--out` are required;
+`--output-language <tag>` (must equal the config's `output_language`,
+otherwise `CONFIG_LANGUAGE_CONFLICT`), `--video-source screen|camera`
+(default screen), `--fixture-dir`
 (fixture mode only, default `fixtures/default`), `--prompts-dir`
 (default `prompts`), `--pricing` (default `configs/pricing.json`),
 `--provider-mode fixture|live` (default `fixture`).
 
 `repeat` re-runs only the judge stage (3 samples) five times against the frozen
 transcript / evidence-set / selected frames of a completed run, then writes
-`repeat-report.json` (per-criterion mean and population σ, pass when σ ≤ 0.5).
+`repeat-report.json` (per-criterion mean and population σ, pass when σ ≤ 0.5),
+`usage.json`, and `runs/NN/` directories (each with `manifest.json`,
+`judge-run.json`, `scorecard.json`, `attempts/`).
+
+`repeat` flags: `--from` / `--out` / `--provider-mode fixture|live` are
+required (no default); `--times` must be `5` in Phase 0 (otherwise
+`INVALID_ARGS`); `--fixture-dir` (default `fixtures/default`),
+`--prompts-dir` (default `prompts`), `--pricing` (default
+`configs/pricing.json`).
 Runs are frozen with `frozen_inputs.hash_version: 2`; older runs are rejected
 with `UNSUPPORTED_FROZEN_INPUT_VERSION` and must be run again with the current
 CLI. The v2 frozen input includes transcript, evidence-set, config and rubric
 snapshot hashes, ordered selected-frame records, all prompt hashes, the judge
 schema hash, normalized extra review flags, and the composite `input_hash`.
 
-`repeat` flags: `--output-language <tag>` re-runs the judge stage with only the
+`repeat --output-language <tag>` re-runs the judge stage with only the
 judge prompt's `{{output_language}}` replaced by `<tag>`, keeping the frozen
 transcript / evidence-set / frames. The prompt template is loaded from
 `--prompts-dir` (default `prompts`) using the frozen config's `prompt_version`;
@@ -127,8 +138,8 @@ schemas, a 120 s per-attempt timeout, and the Files API for audio upload.
 | code | meaning |
 |---|---|
 | 0 | artifacts generated / repeat pass |
-| 2 | input / config / schema-invalid (INVALID_MEDIA, CONFIG_INVALID, CONFIG_LANGUAGE_CONFLICT, OUTPUT_DIR_NOT_EMPTY, PROVIDER_MODE_MISMATCH, INPUT_HASH_MISMATCH, INVALID_LANGUAGE, INVALID_ARGS) |
-| 3 | external dependency / provider / media-processing / internal failure (FFMPEG_NOT_FOUND, MISSING_CREDENTIALS, PROVIDER_*, DEADLINE_EXCEEDED, INTERNAL_ERROR) |
+| 2 | input / config / schema-invalid (INVALID_ARGS, INVALID_MEDIA, INVALID_LANGUAGE, CONFIG_INVALID, RUBRIC_INVALID, CONFIG_LANGUAGE_CONFLICT, INPUT_INVALID, OUTPUT_DIR_NOT_EMPTY, PROVIDER_MODE_MISMATCH, INPUT_HASH_MISMATCH, UNSUPPORTED_FROZEN_INPUT_VERSION, FIXTURE_NOT_FOUND, FIXTURE_INVALID) |
+| 3 | external dependency / provider / media-processing / internal failure (FFMPEG_NOT_FOUND, FFMPEG_FAILED, MISSING_CREDENTIALS, PROVIDER_*, DEADLINE_EXCEEDED, INTERNAL_ERROR) |
 | 4 | repeat quality evaluation failed (σ > 0.5) |
 | 5 | insufficient data to evaluate (NO_TRANSCRIPT, repeat not_evaluated) |
 

@@ -34,6 +34,7 @@
 - `src/providers/` — provider 抽象（`types.ts`）、`fixture/`（ネットワーク・認証なし）、`google/`（live）
 - `prompts/` `rubrics/` `configs/` — バージョン管理された入力コンテンツ（ハッシュ対象）
 - `fixtures/` — fixture モード用の固定 provider 応答（`tr#0` / `frame#2` / `ev#1` プレースホルダ）
+- `samples/` — live モード検証用のピッチ原稿などの入力素材（生成メディアは `.gitignore` 対象）
 - `tests/` — Vitest テスト
 - `scripts/` — `judgathon.mjs`（ランチャー）、`make-sample-video.mjs`（開発用）
 
