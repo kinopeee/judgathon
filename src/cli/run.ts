@@ -15,7 +15,7 @@ import {
   writeJsonAtomic,
 } from '../core/storage.js';
 import { buildUsageReport, loadPricing, pricingRef } from '../core/usage.js';
-import { selectAuditSample } from '../core/evidence-audit.js';
+import { buildEvidenceAuditArtifact } from '../core/evidence-audit.js';
 import {
   fillPrompt,
   loadPrompt,
@@ -302,15 +302,10 @@ export async function cmdRun(opts: RunOptions): Promise<{
     log('[finalize] writing manifest');
     await writeUsage(ctx.completedAttempts);
 
-    const auditIds = selectAuditSample(ids.evidenceIds);
-    await writeJsonAtomic(path.join(outDir, 'evidence-audit.json'), {
-      schema_version: 1,
-      seed: 'evidence-audit-v1',
-      selected_ids: auditIds,
-      total: ids.evidenceIds.length,
-      status: ids.evidenceIds.length === 0 ? 'na' : 'pending_human_review',
-      reviews: [],
-    });
+    await writeJsonAtomic(
+      path.join(outDir, 'evidence-audit.json'),
+      buildEvidenceAuditArtifact(ids.evidenceIds),
+    );
 
     manifest.artifacts = {
       transcript: 'transcript.json',
