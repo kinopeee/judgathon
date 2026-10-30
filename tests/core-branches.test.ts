@@ -7,7 +7,7 @@ import {
 import { callWithAttempts, FailedAttemptError, type RawAttemptBody } from '../src/core/retry.js';
 import { CliError, ProviderError } from '../src/core/errors.js';
 import { TEST_RUBRIC, scoreOutput } from './helpers.js';
-import type { ProviderCallResult } from '../src/providers/types.js';
+import type { ProviderCallResult, Usage } from '../src/providers/types.js';
 
 // §43: branch coverage for the core reference-validation and retry modules.
 
@@ -251,15 +251,110 @@ describe('callWithAttempts branches', () => {
     expect(calls).toBe(2);
   });
 
-  it('plain CliError from validate propagates as-is', async () => {
+  const USAGE: Usage = {
+    input_tokens: 100,
+    output_tokens: 20,
+    thinking_tokens: 5,
+    total_tokens: 125,
+    input_modality_tokens: { TEXT: 100 },
+  };
+  const billedResult = (v: unknown): ProviderCallResult<unknown> => ({
+    ...okResult(v),
+    usage: USAGE,
+    modelVersion: 'gemini-test-001',
+    responseId: 'resp-1',
+  });
+
+  it('CliError from validate keeps the billed attempt and propagates the error as-is', async () => {
+    const saved: RawAttemptBody[] = [];
+    let calls = 0;
+    const err = await callWithAttempts(
+      {
+        ...baseCtx,
+        model: 'gemini-test',
+        saveRaw: async (b) => {
+          saved.push(b);
+          return `attempts/${b.attempt_index}.json`;
+        },
+      },
+      async () => {
+        calls += 1;
+        return billedResult({ v: 1 });
+      },
+      () => {
+        throw new CliError('VALIDATE_FAILED', 'v', 4, 'judge');
+      },
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FailedAttemptError);
+    expect(err).toMatchObject({ code: 'VALIDATE_FAILED', message: 'v', exitCode: 4, stage: 'judge' });
+    const attempts = (err as FailedAttemptError).attempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      status: 'fatal_error',
+      usage: USAGE,
+      error: { code: 'VALIDATE_FAILED', message: 'v' },
+      raw_output_path: 'attempts/0.json',
+      model: 'gemini-test',
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ raw_text: JSON.stringify({ v: 1 }), usage: USAGE });
+    expect(calls).toBe(1);
+  });
+
+  it('non-CliError from validate -> INTERNAL_ERROR (not PROVIDER_OTHER), billed attempt kept', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const thrown = new TypeError('cannot read properties of undefined');
+    let calls = 0;
+    const err = await callWithAttempts(
+      { ...baseCtx, sleep },
+      async () => {
+        calls += 1;
+        return billedResult({ v: 1 });
+      },
+      () => {
+        throw thrown;
+      },
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FailedAttemptError);
+    expect(err).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      message: thrown.message,
+      exitCode: 3,
+      stage: 'judge',
+    });
+    expect((err as FailedAttemptError).cause).toBe(thrown);
+    const attempts = (err as FailedAttemptError).attempts;
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      status: 'fatal_error',
+      usage: USAGE,
+      error: { code: 'INTERNAL_ERROR', message: thrown.message },
+    });
+    expect(calls).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('validate throwing after a validation_failed attempt keeps both attempts', async () => {
+    let calls = 0;
     const err = await callWithAttempts(
       baseCtx,
-      async () => okResult(1),
-      () => {
+      async () => {
+        calls += 1;
+        return billedResult({ attempt: calls });
+      },
+      (p) => {
+        if ((p as { attempt: number }).attempt === 1) {
+          return { ok: false, errors: [{ code: 'SCHEMA_VIOLATION', message: 'bad' }] };
+        }
         throw new CliError('VALIDATE_FAILED', 'v', 3, 'judge');
       },
     ).catch((e: unknown) => e);
-    expect(err).toMatchObject({ code: 'VALIDATE_FAILED', attempts: [] });
+    expect(err).toMatchObject({ code: 'VALIDATE_FAILED' });
+    expect((err as FailedAttemptError).attempts.map((a) => a.status)).toEqual([
+      'validation_failed',
+      'fatal_error',
+    ]);
+    expect(calls).toBe(2);
   });
 
   it('non-ProviderError Error -> PROVIDER_OTHER fatal, single attempt', async () => {
