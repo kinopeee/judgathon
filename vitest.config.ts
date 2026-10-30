@@ -15,7 +15,7 @@ export default defineConfig({
       exclude: ['src/cli/**'],
       thresholds: {
         // §43: deterministic core logic held to ~full coverage.
-        'src/core/**': { lines: 90, statements: 90, functions: 85, branches: 78 },
+        'src/core/**': { lines: 97, statements: 96, functions: 98, branches: 91 },
       },
     },
   },

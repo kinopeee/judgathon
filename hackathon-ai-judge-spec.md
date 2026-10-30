@@ -2710,7 +2710,7 @@ pnpm build
 
 ## 43. 受け入れテストと実装完了判定
 
-以下は実装前のテスト観点表である。本改訂は仕様書のみで、テストコード・実行環境はまだ存在しない。Phase 0実装時に該当ケースをVitestへ落とし、Phase 1項目はそのフェーズで追加する。Given / When / Thenで前提・操作・アサーションを分け、例外は型・message・codeを検証する。
+以下は実装前のテスト観点表である。テストコードはVitestで`tests/`配下にあり、CIで`pnpm test:coverage`を実行する。Phase 1項目はそのフェーズで追加する。Given / When / Thenで前提・操作・アサーションを分け、例外は型・message・codeを検証する。
 
 | Case ID | Input / Precondition | Perspective (Equivalence / Boundary) | Expected Result | Notes |
 |---|---|---|---|---|
