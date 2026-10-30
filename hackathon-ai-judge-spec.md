@@ -2581,6 +2581,7 @@ pnpm exec judgathon repeat --from ./out/team_alpha --times 5 --provider-mode fix
 - `judge-run.json`: phase=provisional、3つのsample_indexと各試行、実効モデル設定、status、input hash。`attempts/`にはProviderの出力本文と検証エラーを保存し、Authorization headerなど通信資格情報は保存しない。
 - `scorecard.json`: §13のシステム保存形式に加え、全検証済みサンプル、representative_sample_index、review_flags、normalized_total_scoreを保持する。
 - `usage.json`: 全試行のoperation・latency・token / audio / image usage・料金表版・推定USD。`calculation_version`は`gemini-output-plus-thinking-v2`とし、推定費用は`input_tokens * input_rate / 1e6 + (output_tokens + thinking_tokens) * output_rate / 1e6`で計算する。未提供値はnull、fixtureはmode=fixtureとし実費として扱わない。
+- `evidence-audit.json`: Evidence正確性の人監査用サンプル。母集団Evidence IDから決定的に選んだ`selected_ids`、母集団件数`total`、`status`（`na` / `pending_human_review`）、30件未満の参考値フラグ`reference_only`、固定seed`evidence-audit-v1`、レビュー結果`reviews`を保存する。選び方の定義は「§41.6 Evidence正確性」を参照。
 
 IDはシステムが発行し、全runを跨いで一意なprefix付きIDとする。LLMは発行済みsource IDを引用し、EvidenceのIDは検証後にシステムが付ける。中間生成物は一時ファイルからatomic renameし、manifest.status=completedは全成果物の保存後にのみ設定する。失敗時はstatus=failedとstageを保存し、完成済みの別runを変更しない。入力検証で出力先を確保する前の失敗はstderrとstdoutのエラーJSONだけを返し、既存ディレクトリへ失敗manifestを書き込まない。
 
