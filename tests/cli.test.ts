@@ -57,6 +57,8 @@ describe('CLI run/repeat (fixture, no network)', () => {
     expect(summary.status).toBe('completed');
     const manifest = JSON.parse(await fs.readFile(path.join(out, 'manifest.json'), 'utf8'));
     expect(manifest.status).toBe('completed');
+    JSON.parse(await fs.readFile(path.join(out, 'evidence-audit.json'), 'utf8'));
+    expect(manifest.artifacts.evidence_audit).toBe('evidence-audit.json');
     const scorecard = JSON.parse(await fs.readFile(path.join(out, 'scorecard.json'), 'utf8'));
     const te = scorecard.criteria.find((c: { criterion_id: string }) => c.criterion_id === 'technical_execution');
     expect(te.score).toBe('18.75');
