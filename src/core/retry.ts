@@ -129,7 +129,49 @@ export async function callWithAttempts<T>(
     try {
       const result = await call(repairFeedback);
       const latency = ctx.now() - started;
-      const validation = validate(result.output);
+      let validation: ReturnType<typeof validate>;
+      try {
+        validation = validate(result.output);
+      } catch (validateErr) {
+        // The provider call already returned (billed): keep the attempt and
+        // its raw output for usage.json, then fail without retrying.
+        const message = validateErr instanceof Error ? validateErr.message : String(validateErr);
+        const cliErr =
+          validateErr instanceof CliError
+            ? validateErr
+            : Object.assign(new CliError('INTERNAL_ERROR', message, 3, ctx.stage), {
+                cause: validateErr,
+              });
+        const error = { code: cliErr.code, message: cliErr.message };
+        record = {
+          attempt_index: attempt,
+          operation: ctx.operation,
+          sample_index: ctx.sampleIndex,
+          started_at: startedAt,
+          latency_ms: latency,
+          status: 'fatal_error',
+          error,
+          validation_errors: [],
+          raw_output_path: null,
+          usage: result.usage,
+        };
+        if (ctx.model !== undefined) record.model = ctx.model;
+        attempts.push(record);
+        record.raw_output_path = await saveAttempt({
+          operation: ctx.operation,
+          sample_index: ctx.sampleIndex,
+          attempt_index: attempt,
+          raw_text: result.rawText,
+          parsed: result.output,
+          validation_errors: [],
+          error,
+          usage: result.usage,
+          latency_ms: latency,
+          model_version: result.modelVersion,
+          response_id: result.responseId,
+        });
+        throw new FailedAttemptError(cliErr, attempts);
+      }
       if (validation.ok) {
         record = {
           attempt_index: attempt,
@@ -190,7 +232,7 @@ export async function callWithAttempts<T>(
       });
       repairFeedback = `Your previous output failed validation: ${msgs.join('; ')}; return corrected JSON`;
     } catch (err) {
-      // CliError from call/validate, or INTERNAL_ERROR from saveAttempt:
+      // CliError from call, or FailedAttemptError from validate/saveAttempt:
       // propagate as-is instead of misclassifying it as a provider failure.
       if (err instanceof FailedAttemptError) throw err;
       if (err instanceof CliError) throw new FailedAttemptError(err, attempts);
