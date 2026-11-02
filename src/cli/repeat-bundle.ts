@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { CliError } from '../core/errors.js';
+import { canonicalBcp47Tag } from '../core/language.js';
 import { rubricVersionId } from '../core/ids.js';
 import { computeInputHash, judgeSchemaSha256 } from '../core/input-hash.js';
 import { readJsonFile, sha256File, sha256Hex } from '../core/storage.js';
@@ -69,28 +70,18 @@ async function compareOutputLanguage(args: {
   log: (line: string) => void;
 }): Promise<LanguageCompareResult> {
   const { frozenInputs, judgeEntry, config, log } = args;
-  let targetLang: string;
-  try {
-    targetLang = Intl.getCanonicalLocales(args.outputLanguage)[0]!;
-  } catch {
-    throw new CliError(
-      'INVALID_LANGUAGE',
-      `--output-language '${args.outputLanguage}' is not a valid BCP 47 tag`,
-      2,
-      'validate_input',
-    );
-  }
-  let frozenLang: string;
-  try {
-    frozenLang = Intl.getCanonicalLocales(config.output_language)[0]!;
-  } catch {
-    throw new CliError(
-      'CONFIG_INVALID',
-      `config output_language '${config.output_language}' is not a valid BCP 47 tag`,
-      2,
-      'validate_input',
-    );
-  }
+  const targetLang = canonicalBcp47Tag(args.outputLanguage, {
+    code: 'INVALID_LANGUAGE',
+    message: `--output-language '${args.outputLanguage}' is not a valid BCP 47 tag`,
+    exitCode: 2,
+    stage: 'validate_input',
+  });
+  const frozenLang = canonicalBcp47Tag(config.output_language, {
+    code: 'CONFIG_INVALID',
+    message: `config output_language '${config.output_language}' is not a valid BCP 47 tag`,
+    exitCode: 2,
+    stage: 'validate_input',
+  });
   // Same normalized tag as the frozen run: identical to a normal repeat —
   // no template load, no prompt substitution, no compare metadata.
   if (targetLang === frozenLang) {
