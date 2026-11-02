@@ -1,4 +1,4 @@
-import { CliError, ProviderError, isRetryableProviderError } from './errors.js';
+import { asCliError, CliError, ProviderError, isRetryableProviderError } from './errors.js';
 import type { ProviderCallResult, Usage } from '../providers/types.js';
 import type { ValidationIssue } from './reference-validation.js';
 
@@ -78,6 +78,12 @@ export class FailedAttemptError extends CliError {
 
 const DEFAULT_BACKOFF_MS = [1000, 2000];
 
+/** §41.5 default attempt budget shared by transcript, evidence, and judge stages. */
+export const PROVIDER_MAX_ATTEMPTS = 3;
+
+export const sleepMs = (ms: number): Promise<void> =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export async function callWithAttempts<T>(
   ctx: AttemptContext,
   call: (repairFeedback: string | undefined) => Promise<ProviderCallResult<unknown>>,
@@ -135,13 +141,11 @@ export async function callWithAttempts<T>(
       } catch (validateErr) {
         // The provider call already returned (billed): keep the attempt and
         // its raw output for usage.json, then fail without retrying.
-        const message = validateErr instanceof Error ? validateErr.message : String(validateErr);
-        const cliErr =
-          validateErr instanceof CliError
-            ? validateErr
-            : Object.assign(new CliError('INTERNAL_ERROR', message, 3, ctx.stage), {
-                cause: validateErr,
-              });
+        const cliErr = asCliError(validateErr, {
+          code: 'INTERNAL_ERROR',
+          exitCode: 3,
+          stage: ctx.stage,
+        });
         const error = { code: cliErr.code, message: cliErr.message };
         record = {
           attempt_index: attempt,

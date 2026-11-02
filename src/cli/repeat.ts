@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { CliError } from '../core/errors.js';
+import { asCliError, CliError } from '../core/errors.js';
 import { newJudgeRunId, newRunId } from '../core/ids.js';
 import { buildRepeatReport } from '../core/repeat-report.js';
 import { normalizeReviewFlags } from '../core/input-hash.js';
@@ -126,17 +126,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
       } catch (err) {
         // If the child dir itself is unwritable every later artifact save
         // fails too, so abort immediately with a normalized error.
-        throw err instanceof CliError
-          ? err
-          : Object.assign(
-              new CliError(
-                'INTERNAL_ERROR',
-                err instanceof Error ? err.message : String(err),
-                3,
-                'judge',
-              ),
-              { cause: err },
-            );
+        throw asCliError(err, { code: 'INTERNAL_ERROR', exitCode: 3, stage: 'judge' });
       }
       // Best-effort: a failed-manifest save must not mask the primary error
       // (the on-disk manifest may stay 'running'; the report records 'failed').
@@ -208,17 +198,7 @@ export async function cmdRepeat(opts: RepeatOptions): Promise<{
           // the run actually stopped.
           childManifest.status = 'running';
           childManifest.stage = 'judge';
-          throw err instanceof CliError
-            ? err
-            : Object.assign(
-                new CliError(
-                  'INTERNAL_ERROR',
-                  err instanceof Error ? err.message : String(err),
-                  3,
-                  'judge',
-                ),
-                { cause: err },
-              );
+          throw asCliError(err, { code: 'INTERNAL_ERROR', exitCode: 3, stage: 'judge' });
         }
         perRunLevels.push(levels);
         runs.push({ index: i + 1, path: `runs/${idx}`, status: 'completed', run_id: childRunId });

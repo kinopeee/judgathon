@@ -38,7 +38,7 @@ import {
   type FrameCandidate,
   type FrameSelectionResult,
 } from '../core/frame-selection.js';
-import { callWithAttempts, type AttemptRecord } from '../core/retry.js';
+import { callWithAttempts, PROVIDER_MAX_ATTEMPTS, sleepMs, type AttemptRecord } from '../core/retry.js';
 import { computeInputHash, judgeSchemaSha256, normalizeReviewFlags } from '../core/input-hash.js';
 import { sha256File, sha256Hex, writeJsonAtomic, writeTextAtomic } from '../core/storage.js';
 import { buildUsageReport, pricingRef, type PricingFile } from '../core/usage.js';
@@ -55,9 +55,6 @@ import {
   type PromptRef,
 } from './judge-stage.js';
 import type { RunOptions } from './run.js';
-
-const MAX_ATTEMPTS = 3;
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** A frame record persisted under manifest.media.frames. */
 export interface ManifestFrame {
@@ -280,8 +277,8 @@ export async function transcribe(
       operation: 'transcript',
       model: config.transcriber.model,
       sampleIndex: null,
-      maxAttempts: MAX_ATTEMPTS,
-      sleep,
+      maxAttempts: PROVIDER_MAX_ATTEMPTS,
+      sleep: sleepMs,
       now: () => Date.now(),
       deadlineMs: ctx.deadlineMs,
       stage: 'transcript',
@@ -376,8 +373,8 @@ export async function extractEvidence(
       operation: 'evidence',
       model: config.evidence_extractor.model,
       sampleIndex: null,
-      maxAttempts: MAX_ATTEMPTS,
-      sleep,
+      maxAttempts: PROVIDER_MAX_ATTEMPTS,
+      sleep: sleepMs,
       now: () => Date.now(),
       deadlineMs: ctx.deadlineMs,
       stage: 'evidence',

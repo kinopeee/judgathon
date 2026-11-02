@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
-import { CliError } from '../core/errors.js';
+import { asCliError, CliError } from '../core/errors.js';
+import { canonicalBcp47Tag } from '../core/language.js';
 import { newJudgeRunId, newPitchId, newRunId, rubricVersionId } from '../core/ids.js';
 import { validateConfig, type JudgeConfig } from '../core/schemas/config.js';
 import { validateRubric, type Rubric } from '../core/schemas/rubric.js';
@@ -87,29 +88,19 @@ async function loadInputs(opts: RunOptions): Promise<{
 
   // Language: --output-language must equal the config value after BCP 47
   // canonicalization; omitted -> use config value.
-  let outputLanguage: string;
-  try {
-    outputLanguage = Intl.getCanonicalLocales(cfg.config.output_language)[0]!;
-  } catch {
-    throw new CliError(
-      'INVALID_LANGUAGE',
-      `config output_language '${cfg.config.output_language}' is not a valid BCP 47 tag`,
-      2,
-      'validate_input',
-    );
-  }
+  const outputLanguage = canonicalBcp47Tag(cfg.config.output_language, {
+    code: 'INVALID_LANGUAGE',
+    message: `config output_language '${cfg.config.output_language}' is not a valid BCP 47 tag`,
+    exitCode: 2,
+    stage: 'validate_input',
+  });
   if (opts.outputLanguage !== undefined) {
-    let cliLang: string;
-    try {
-      cliLang = Intl.getCanonicalLocales(opts.outputLanguage)[0]!;
-    } catch {
-      throw new CliError(
-        'INVALID_LANGUAGE',
-        `--output-language '${opts.outputLanguage}' is not a valid BCP 47 tag`,
-        2,
-        'validate_input',
-      );
-    }
+    const cliLang = canonicalBcp47Tag(opts.outputLanguage, {
+      code: 'INVALID_LANGUAGE',
+      message: `--output-language '${opts.outputLanguage}' is not a valid BCP 47 tag`,
+      exitCode: 2,
+      stage: 'validate_input',
+    });
     if (cliLang !== outputLanguage) {
       throw new CliError(
         'CONFIG_LANGUAGE_CONFLICT',
@@ -335,18 +326,7 @@ export async function cmdRun(opts: RunOptions): Promise<{
         // never mask the real failure with a usage-write error
       }
     }
-    const cliErr =
-      err instanceof CliError
-        ? err
-        : Object.assign(
-            new CliError(
-              'INTERNAL_ERROR',
-              err instanceof Error ? err.message : String(err),
-              3,
-              'internal',
-            ),
-            { cause: err },
-          );
+    const cliErr = asCliError(err, { code: 'INTERNAL_ERROR', exitCode: 3, stage: 'internal' });
     return await fail(cliErr.stage, cliErr);
   }
 }
