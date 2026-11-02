@@ -3,7 +3,7 @@
 ## 対象と根拠
 - 対象は `github.com/kinopeee/judgathon` の Phase 0 ローカルCLI全体。この文書は仕様上の要求、実装済みの対策、未解決のリスクと運用前提を区別する。
 - 現状は録画をバッチ審査する Phase 0 のローカルCLI。Webサーバー、DB、認証付きダッシュボードは実装対象外。将来のサービス構想と現在の攻撃面を区別する。
-- 主な根拠: [README](https://github.com/kinopeee/judgathon/blob/main/README.md)、[仕様書](https://github.com/kinopeee/judgathon/blob/main/hackathon-ai-judge-spec.md) §22.5、§25、§40、§41、§42.5、[AGENTS.md](https://github.com/kinopeee/judgathon/blob/main/AGENTS.md)。確認したコードの基準コミットは `af739f9341f751dd4f7a6ebc4d9c53b4baef01c9`。機能や運用環境が変わった場合は、以下の前提と実装を再確認する。
+- 主な根拠: [README](https://github.com/kinopeee/judgathon/blob/af739f9341f751dd4f7a6ebc4d9c53b4baef01c9/README.md)、[仕様書](https://github.com/kinopeee/judgathon/blob/af739f9341f751dd4f7a6ebc4d9c53b4baef01c9/hackathon-ai-judge-spec.md) §22.5、§25、§40、§41、§42.5、[AGENTS.md](https://github.com/kinopeee/judgathon/blob/af739f9341f751dd4f7a6ebc4d9c53b4baef01c9/AGENTS.md)。確認したコードの基準コミットは `af739f9341f751dd4f7a6ebc4d9c53b4baef01c9`。機能や運用環境が変わった場合は、以下の前提と実装を再確認する。
 - **既存仕様・利用者が確認した運用前提**と**コードからの読み取り・未確認の仮定**を以下で分ける。後者だけを理由に指摘の重大度を変更しない。
 - 確認済みの運用前提: 外部から受け取った設定・実行結果も処理する。インフラリポジトリはなく、ローカルCLIとして評価する。分類はコンポーネント別のみ。
 
@@ -59,12 +59,44 @@
 - 同意、Providerのデータ利用条件、具体的な保持期間と公開範囲は仕様§40でも運用上の未決事項。Phase 1向けの保持例を現在のCLIで強制済みとは扱わない。
 - 利用者が確認した運用前提: 外部設定・外部実行結果を入力として扱うため、それらの提供者を信頼済み主催者と同一視して降格しない。インフラリポジトリはなく、ローカルCLIを評価対象とする。個別の漏洩・改ざん・可用性リスクを受容するとの指定はない。
 
-## 追加調査と限定検証（2026-11-03、運用前提とは区別）
+## 追加調査と限定検証（2026-11-03 JST、運用前提とは区別）
 - 利用者が提供した別ツールの報告には、メディア解析の内部URL参照、採点へのプロンプトインジェクション、メディア処理の資源枯渇がある。これは調査資料であり、利用者が個別リスクを受容したという意味ではない。
-- 調査用VM（利用者の実行環境ではない）のffprobe 4.4.2で、拡張子が.mp4のローカルDASHマニフェストを実装のvalidateMediaFileに渡すと、入力拒否前に127.0.0.1の検証専用HTTPサーバーへGETが発生した。同じ入力はプロトコル許可をfileだけにしても通信し、コンテナ形式許可も併用するとこの入力の通信は0件だった。HLS入力の現行呼出しは既定許可リストで通信が拒否された。形式・ビルドごとの違いを区別する。
+- 調査用VM（利用者の実行環境ではない）のffprobe 4.4.2で、拡張子が.mp4のローカルDASHマニフェストを実装のvalidateMediaFileに渡すと、入力拒否前に127.0.0.1の検証専用HTTPサーバーへGETが発生した。同じ入力はプロトコル許可をfileだけにしても通信し、コンテナ形式許可も併用するとこの入力の通信は0件だった。
+- 下記のHLS入力では、同じ調査用VMの現行引数でHTTP GETは0件、終了コードは1だった。stderrに `Protocol 'http' not on whitelist 'file,crypto,data'!` が記録された。このビルドと入力で観測した挙動であり、アプリケーションが許可リストを設定していることや、すべてのHLS入力で通信を遮断することの保証ではない。
 - この限定検証の接続先はループバックだけ。利用者端末、内部サービス、クラウドメタデータ、応答漏洩、CLI全体の通し実行は未検証。この結果を全FFmpegビルドへ一般化しない。
 - プロンプトインジェクションの採点誘導はコード上の残存リスクとして確認したが、live Geminiでの成功例は未実証。別モデルやキーワード検出を追加するだけで完全防止できるとは扱わない。
 - 資源枯渇は既存スキャンのフレーム抽出指摘と重なるが、追加報告は子プロセスの期限、通常ファイル確認、全ファイル読込みも含む。ローカル環境の実際の資源限界や無期限停止の再現は未確認。
+
+<details>
+<summary>HLS限定検証の条件・入力・コマンド</summary>
+
+- 環境: Ubuntu 22.04、ffprobe `4.4.2-0ubuntu0.22.04.1`。以下は `ffprobe -version` で確認したビルド情報。
+
+```text
+built with gcc 11 (Ubuntu 11.2.0-19ubuntu1)
+configuration: --prefix=/usr --extra-version=0ubuntu0.22.04.1 --toolchain=hardened --libdir=/usr/lib/x86_64-linux-gnu --incdir=/usr/include/x86_64-linux-gnu --arch=amd64 --enable-gpl --disable-stripping --enable-gnutls --enable-ladspa --enable-libaom --enable-libass --enable-libbluray --enable-libbs2b --enable-libcaca --enable-libcdio --enable-libcodec2 --enable-libdav1d --enable-libflite --enable-libfontconfig --enable-libfreetype --enable-libfribidi --enable-libgme --enable-libgsm --enable-libjack --enable-libmp3lame --enable-libmysofa --enable-libopenjpeg --enable-libopenmpt --enable-libopus --enable-libpulse --enable-librabbitmq --enable-librubberband --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libspeex --enable-libsrt --enable-libssh --enable-libtheora --enable-libtwolame --enable-libvidstab --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx265 --enable-libxml2 --enable-libxvid --enable-libzimg --enable-libzmq --enable-libzvbi --enable-lv2 --enable-omx --enable-openal --enable-opencl --enable-opengl --enable-sdl2 --enable-pocketsphinx --enable-librsvg --enable-libmfx --enable-libdc1394 --enable-libdrm --enable-libiec61883 --enable-chromaprint --enable-frei0r --enable-libx264 --enable-shared
+```
+
+- 入力: 次のテキストを `hls.mp4` として保存した。HTTPサーバーは `127.0.0.1` のみにbindし、OSが割り当てたポート（この実行では42721）でGETを記録し、HTTP 200とダミー本文 `not-a-video`（11バイト）を返す。外部サービスや秘密情報は使用しない。
+
+```text
+#EXTM3U
+#EXT-X-TARGETDURATION:1
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:1.0,
+http://127.0.0.1:42721/segment.ts
+#EXT-X-ENDLIST
+```
+
+- 呼出し: 入力パスだけを相対表記に置換した完全な引数列。アプリケーションと同様に明示的な許可リストは指定していない。検証ハーネス側で4秒の期限を設定したが、CLIに実装された期限ではない。
+
+```sh
+ffprobe -v error -show_entries format=format_name,duration:stream=codec_type,width,height -of json ./hls.mp4
+```
+
+- 対照確認: 上記に `-protocol_whitelist file,http,tcp` を入力前のオプションとして追加すると、同じサーバーへのGETが1件記録された。ダミー本文はメディアではないため、この場合も解析は失敗した。解析失敗だけを無通信の証拠にせず、GET記録で区別する。
+
+</details>
 
 ## 未確認事項
 - 実際の端末・CIでの共有権限、外部入力を受け取る具体的な手順、録画同意・保持とAPI送信の運用。
