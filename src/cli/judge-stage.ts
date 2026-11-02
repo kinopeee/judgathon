@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { CliError } from '../core/errors.js';
+import { asCliError, CliError } from '../core/errors.js';
 import type { JudgeConfig } from '../core/schemas/config.js';
 import type { Rubric } from '../core/schemas/rubric.js';
 import {
@@ -11,6 +11,8 @@ import { validateScoreOutput } from '../core/reference-validation.js';
 import {
   callWithAttempts,
   FailedAttemptError,
+  PROVIDER_MAX_ATTEMPTS,
+  sleepMs,
   type AttemptRecord,
   type AttemptSuccess,
 } from '../core/retry.js';
@@ -18,8 +20,6 @@ import { sha256Hex, writeJsonAtomic } from '../core/storage.js';
 import { aggregateScores, type ScorecardResult } from '../core/aggregation.js';
 import { applyNameMask, buildNameMaskMap } from '../core/name-masking.js';
 import type { Judge, TranscriptSegment } from '../providers/types.js';
-
-const MAX_ATTEMPTS = 3;
 
 export interface PromptRef {
   version: string;
@@ -90,8 +90,6 @@ export async function loadPrompt(promptsDir: string, version: string): Promise<P
   return { version, path: p, sha256: sha256Hex(text), text };
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
 export async function runJudgeStage(opts: {
   outDir: string;
   judge: Judge;
@@ -134,8 +132,8 @@ export async function runJudgeStage(opts: {
         operation: 'judge',
         model: opts.judgeEntry.model,
         sampleIndex,
-        maxAttempts: MAX_ATTEMPTS,
-        sleep,
+        maxAttempts: PROVIDER_MAX_ATTEMPTS,
+        sleep: sleepMs,
         now: () => Date.now(),
         deadlineMs: opts.deadlineMs,
         stage: opts.stage,
@@ -174,18 +172,7 @@ export async function runJudgeStage(opts: {
       // them with prior successful samples so every provider call reaches
       // usage.json.
       if (err instanceof FailedAttemptError) allAttempts.push(...err.attempts);
-      const cliErr =
-        err instanceof CliError
-          ? err
-          : Object.assign(
-              new CliError(
-                'INTERNAL_ERROR',
-                err instanceof Error ? err.message : String(err),
-                3,
-                opts.stage,
-              ),
-              { cause: err },
-            );
+      const cliErr = asCliError(err, { code: 'INTERNAL_ERROR', exitCode: 3, stage: opts.stage });
       throw new FailedAttemptError(cliErr, allAttempts);
     }
     allAttempts.push(...res.attempts);

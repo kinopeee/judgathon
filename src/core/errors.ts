@@ -46,3 +46,20 @@ export class ProviderError extends Error {
 export function isRetryableProviderError(err: ProviderError): boolean {
   return err.kind === 'timeout' || err.kind === 'rate_limited' || err.kind === 'server';
 }
+
+/** Pass through CliError; otherwise wrap with fallback code/stage and preserve cause. */
+export function asCliError(
+  err: unknown,
+  fallback: { code: string; exitCode: ExitCode; stage: string },
+): CliError {
+  if (err instanceof CliError) return err;
+  return Object.assign(
+    new CliError(
+      fallback.code,
+      err instanceof Error ? err.message : String(err),
+      fallback.exitCode,
+      fallback.stage,
+    ),
+    { cause: err },
+  );
+}
